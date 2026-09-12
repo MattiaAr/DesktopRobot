@@ -2,14 +2,16 @@
 
 #include <Arduino.h>
 
+// RoboEyes defines several mood names as preprocessor symbols (HAPPY, TIRED,
+// ANGRY, etc.). Prefixing our enum values avoids preprocessor collisions.
 enum class RobotState {
-    NORMAL,
-    HAPPY,
-    TIRED,
-    ANGRY,
-    CURIOUS,
-    BORED,
-    SLEEPING
+    STATE_NORMAL,
+    STATE_HAPPY,
+    STATE_TIRED,
+    STATE_ANGRY,
+    STATE_CURIOUS,
+    STATE_BORED,
+    STATE_SLEEPING
 };
 
 class BehaviorEngine {
@@ -28,8 +30,8 @@ public:
     bool hasTimedState() const;
 
 private:
-    RobotState state = RobotState::NORMAL;
-    RobotState previousState = RobotState::NORMAL;
+    RobotState state = RobotState::STATE_NORMAL;
+    RobotState previousState = RobotState::STATE_NORMAL;
 
     unsigned long lastInteraction = 0;
     unsigned long stateUntil = 0;
