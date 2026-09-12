@@ -8,8 +8,8 @@ BehaviorEngine::BehaviorEngine(unsigned long curiousAfterMs,
       sleepingAfter(sleepingAfterMs) {}
 
 void BehaviorEngine::begin() {
-    state = RobotState::NORMAL;
-    previousState = RobotState::NORMAL;
+    state = RobotState::STATE_NORMAL;
+    previousState = RobotState::STATE_NORMAL;
     lastInteraction = millis();
     stateUntil = 0;
     changed = true;
@@ -25,39 +25,38 @@ void BehaviorEngine::update() {
         }
 
         stateUntil = 0;
-        state = RobotState::NORMAL;
+        state = RobotState::STATE_NORMAL;
         changed = true;
         return;
     }
 
     const unsigned long idleTime = now - lastInteraction;
 
-    if (state == RobotState::SLEEPING) {
+    if (state == RobotState::STATE_SLEEPING) {
         return;
     }
 
     if (idleTime >= sleepingAfter) {
-        setState(RobotState::SLEEPING);
+        setState(RobotState::STATE_SLEEPING);
     }
     else if (idleTime >= boredAfter) {
-        setState(RobotState::BORED);
+        setState(RobotState::STATE_BORED);
     }
     else if (idleTime >= curiousAfter) {
-        setState(RobotState::CURIOUS);
+        setState(RobotState::STATE_CURIOUS);
     }
-    else if (state == RobotState::CURIOUS || state == RobotState::BORED) {
-        setState(RobotState::NORMAL);
+    else if (state == RobotState::STATE_CURIOUS || state == RobotState::STATE_BORED) {
+        setState(RobotState::STATE_NORMAL);
     }
 }
 
 void BehaviorEngine::interaction() {
     lastInteraction = millis();
 
-    // Waking up is also an interaction.
-    if (state == RobotState::SLEEPING ||
-        state == RobotState::CURIOUS ||
-        state == RobotState::BORED) {
-        setState(RobotState::NORMAL);
+    if (state == RobotState::STATE_SLEEPING ||
+        state == RobotState::STATE_CURIOUS ||
+        state == RobotState::STATE_BORED) {
+        setState(RobotState::STATE_NORMAL);
     }
 }
 
