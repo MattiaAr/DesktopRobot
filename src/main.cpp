@@ -19,8 +19,6 @@
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 Adafruit_MPU6050 mpu;
 RoboEyes<Adafruit_SSD1306> roboEyes(display);
-
-// v0.2 Behavior Engine
 BehaviorEngine behavior;
 
 bool lastButton1 = HIGH;
@@ -34,27 +32,40 @@ unsigned long shakeUntil = 0;
 
 void applyBehaviorState() {
     switch (behavior.getState()) {
-        case RobotState::NORMAL:
+        case RobotState::STATE_NORMAL:
             roboEyes.setMood(DEFAULT);
             break;
-        case RobotState::TIRED:
+        case RobotState::STATE_TIRED:
             roboEyes.setMood(TIRED);
             break;
-        case RobotState::HAPPY:
+        case RobotState::STATE_HAPPY:
             roboEyes.setMood(HAPPY);
             break;
-        case RobotState::ANGRY:
+        case RobotState::STATE_ANGRY:
             roboEyes.setMood(ANGRY);
             break;
-        case RobotState::CURIOUS:
+        case RobotState::STATE_CURIOUS:
             roboEyes.setMood(DEFAULT);
             break;
-        case RobotState::BORED:
+        case RobotState::STATE_BORED:
             roboEyes.setMood(TIRED);
             break;
-        case RobotState::SLEEPING:
+        case RobotState::STATE_SLEEPING:
             roboEyes.setMood(TIRED);
             break;
+    }
+}
+
+void printBehaviorState() {
+    Serial.print(">>> NUOVO STATO: ");
+    switch (behavior.getState()) {
+        case RobotState::STATE_NORMAL:   Serial.println("NORMAL"); break;
+        case RobotState::STATE_HAPPY:    Serial.println("HAPPY"); break;
+        case RobotState::STATE_TIRED:    Serial.println("TIRED"); break;
+        case RobotState::STATE_ANGRY:    Serial.println("ANGRY"); break;
+        case RobotState::STATE_CURIOUS:  Serial.println("CURIOUS"); break;
+        case RobotState::STATE_BORED:    Serial.println("BORED"); break;
+        case RobotState::STATE_SLEEPING: Serial.println("SLEEPING"); break;
     }
 }
 
@@ -105,18 +116,8 @@ void loop() {
     roboEyes.update();
     behavior.update();
 
-    // Applica solo i cambiamenti di stato automatici.
     if (behavior.stateChanged()) {
-        Serial.print(">>> NUOVO STATO: ");
-        switch (behavior.getState()) {
-            case RobotState::NORMAL:   Serial.println("NORMAL"); break;
-            case RobotState::HAPPY:    Serial.println("HAPPY"); break;
-            case RobotState::TIRED:    Serial.println("TIRED"); break;
-            case RobotState::ANGRY:    Serial.println("ANGRY"); break;
-            case RobotState::CURIOUS:  Serial.println("CURIOUS"); break;
-            case RobotState::BORED:    Serial.println("BORED"); break;
-            case RobotState::SLEEPING: Serial.println("SLEEPING"); break;
-        }
+        printBehaviorState();
         applyBehaviorState();
     }
 
@@ -128,7 +129,7 @@ void loop() {
     if (lastButton1 == HIGH && button1 == LOW) {
         Serial.println(">>> PULSANTE 1 -> FELICE!");
         behavior.interaction();
-        behavior.setState(RobotState::HAPPY, 2000);
+        behavior.setState(RobotState::STATE_HAPPY, 2000);
         roboEyes.setMood(HAPPY);
         roboEyes.anim_laugh();
         reactionUntil = millis() + 2000;
@@ -143,7 +144,7 @@ void loop() {
 
     if (wasReacting) {
         Serial.println(">>> REAZIONE FINITA");
-        behavior.setState(tiredMode ? RobotState::TIRED : RobotState::NORMAL);
+        behavior.setState(tiredMode ? RobotState::STATE_TIRED : RobotState::STATE_NORMAL);
         applyBehaviorState();
         wasReacting = false;
     }
@@ -159,10 +160,10 @@ void loop() {
 
         if (tiredMode) {
             Serial.println(">>> MODALITA' TIRED ON");
-            behavior.setState(RobotState::TIRED);
+            behavior.setState(RobotState::STATE_TIRED);
         } else {
             Serial.println(">>> MODALITA' TIRED OFF");
-            behavior.setState(RobotState::NORMAL);
+            behavior.setState(RobotState::STATE_NORMAL);
         }
         applyBehaviorState();
         delay(150);
@@ -190,7 +191,7 @@ void loop() {
     if (movimento > 8.0 && !wasShaking) {
         Serial.println(">>> SCOSSA!");
         behavior.interaction();
-        behavior.setState(RobotState::ANGRY, 800);
+        behavior.setState(RobotState::STATE_ANGRY, 800);
         roboEyes.setMood(ANGRY);
         shakeUntil = millis() + 800;
         wasShaking = true;
@@ -198,7 +199,7 @@ void loop() {
 
     if (wasShaking && millis() > shakeUntil) {
         wasShaking = false;
-        behavior.setState(tiredMode ? RobotState::TIRED : RobotState::NORMAL);
+        behavior.setState(tiredMode ? RobotState::STATE_TIRED : RobotState::STATE_NORMAL);
         applyBehaviorState();
         Serial.println(">>> SCOSSA FINITA");
     }
@@ -213,7 +214,6 @@ void loop() {
     bool forward = y < -threshold;
     bool backward = y > threshold;
 
-    // Le reazioni automatiche mantengono il movimento degli occhi.
     if (right && backward) {
         roboEyes.setPosition(NE);
     } else if (right && forward) {
