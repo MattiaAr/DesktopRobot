@@ -31,41 +31,20 @@ unsigned long shakeUntil = 0;
 void applyBehaviorState() {
     switch (behavior.getState()) {
         case RobotState::STATE_NORMAL:
-            roboEyes.open();
-            roboEyes.setCuriosity(OFF);
-            roboEyes.setIdleMode(OFF);
-            roboEyes.setMood(DEFAULT);
-            roboEyes.setPosition(DEFAULT);
-            break;
+            roboEyes.open(); roboEyes.setAutoblinker(ON, 3, 2); roboEyes.setCuriosity(OFF); roboEyes.setIdleMode(OFF); roboEyes.setMood(DEFAULT); roboEyes.setPosition(DEFAULT); break;
         case RobotState::STATE_TIRED:
-            roboEyes.open();
-            roboEyes.setCuriosity(OFF);
-            roboEyes.setIdleMode(OFF);
-            roboEyes.setMood(TIRED);
-            roboEyes.setPosition(DEFAULT);
-            break;
+            roboEyes.open(); roboEyes.setAutoblinker(ON, 3, 2); roboEyes.setCuriosity(OFF); roboEyes.setIdleMode(OFF); roboEyes.setMood(TIRED); roboEyes.setPosition(DEFAULT); break;
         case RobotState::STATE_HAPPY:
-            roboEyes.open();
-            roboEyes.setMood(HAPPY);
-            break;
+            roboEyes.open(); roboEyes.setAutoblinker(ON, 3, 2); roboEyes.setMood(HAPPY); break;
         case RobotState::STATE_ANGRY:
-            roboEyes.open();
-            roboEyes.setMood(ANGRY);
-            break;
+            roboEyes.open(); roboEyes.setAutoblinker(ON, 3, 2); roboEyes.setMood(ANGRY); break;
         case RobotState::STATE_CURIOUS:
-            roboEyes.open();
-            roboEyes.setMood(DEFAULT);
-            roboEyes.setCuriosity(ON);
-            roboEyes.setIdleMode(ON, 1, 1);
-            break;
+            roboEyes.open(); roboEyes.setAutoblinker(ON, 3, 2); roboEyes.setMood(DEFAULT); roboEyes.setCuriosity(ON); roboEyes.setIdleMode(ON, 1, 1); break;
         case RobotState::STATE_BORED:
-            roboEyes.open();
-            roboEyes.setCuriosity(OFF);
-            roboEyes.setIdleMode(OFF);
-            roboEyes.setMood(TIRED);
-            roboEyes.setPosition(S);
-            break;
+            roboEyes.open(); roboEyes.setAutoblinker(ON, 3, 2); roboEyes.setCuriosity(OFF); roboEyes.setIdleMode(OFF); roboEyes.setMood(TIRED); roboEyes.setPosition(S); break;
         case RobotState::STATE_SLEEPING:
+            // Disable the automatic blinker: otherwise RoboEyes reopens the eyes after close().
+            roboEyes.setAutoblinker(OFF);
             roboEyes.setCuriosity(OFF);
             roboEyes.setIdleMode(OFF);
             roboEyes.close();
@@ -87,118 +66,61 @@ void printBehaviorState() {
 }
 
 void setup() {
-    Serial.begin(115200);
-    delay(1000);
-    Serial.println();
-    Serial.println("=== DESKTOP ROBOT v0.2 ===");
-    Wire.begin(SDA_PIN, SCL_PIN);
-    Wire.setClock(100000);
-    if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
-        Serial.println("ERRORE OLED!");
-        while (true) delay(1000);
-    }
+    Serial.begin(115200); delay(1000);
+    Serial.println(); Serial.println("=== DESKTOP ROBOT v0.2 ===");
+    Wire.begin(SDA_PIN, SCL_PIN); Wire.setClock(100000);
+    if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) { Serial.println("ERRORE OLED!"); while (true) delay(1000); }
     Serial.println("OLED OK!");
-    if (!mpu.begin(0x68, &Wire)) {
-        Serial.println("ERRORE MPU!");
-        while (true) delay(1000);
-    }
+    if (!mpu.begin(0x68, &Wire)) { Serial.println("ERRORE MPU!"); while (true) delay(1000); }
     Serial.println("MPU OK!");
     mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
     mpu.setGyroRange(MPU6050_RANGE_500_DEG);
     mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
     roboEyes.begin(SCREEN_WIDTH, SCREEN_HEIGHT, 100);
     roboEyes.setAutoblinker(ON, 3, 2);
-    roboEyes.setIdleMode(OFF);
-    roboEyes.setMood(DEFAULT);
-    roboEyes.setPosition(DEFAULT);
-    pinMode(BUTTON_PIN_1, INPUT_PULLUP);
-    pinMode(BUTTON_PIN_2, INPUT_PULLUP);
+    roboEyes.setIdleMode(OFF); roboEyes.setMood(DEFAULT); roboEyes.setPosition(DEFAULT);
+    pinMode(BUTTON_PIN_1, INPUT_PULLUP); pinMode(BUTTON_PIN_2, INPUT_PULLUP);
     behavior.begin();
-    Serial.println("PULSANTE 1 -> GPIO19");
-    Serial.println("PULSANTE 2 -> GPIO23");
-    Serial.println("Behavior Engine OK!");
-    Serial.println("ROBOT PRONTO!");
+    Serial.println("PULSANTE 1 -> GPIO19"); Serial.println("PULSANTE 2 -> GPIO23");
+    Serial.println("Behavior Engine OK!"); Serial.println("ROBOT PRONTO!");
 }
 
 void loop() {
-    roboEyes.update();
-    behavior.update();
-
-    if (behavior.stateChanged()) {
-        printBehaviorState();
-        applyBehaviorState();
-    }
+    roboEyes.update(); behavior.update();
+    if (behavior.stateChanged()) { printBehaviorState(); applyBehaviorState(); }
 
     bool button1 = digitalRead(BUTTON_PIN_1);
     if (lastButton1 == HIGH && button1 == LOW) {
-        Serial.println(">>> PULSANTE 1 -> FELICE!");
-        behavior.interaction();
-        behavior.setState(RobotState::STATE_HAPPY, 2000);
-        roboEyes.setMood(HAPPY);
-        roboEyes.anim_laugh();
-        reactionUntil = millis() + 2000;
-        wasReacting = true;
+        Serial.println(">>> PULSANTE 1 -> FELICE!"); behavior.interaction(); behavior.setState(RobotState::STATE_HAPPY, 2000);
+        roboEyes.setMood(HAPPY); roboEyes.anim_laugh(); reactionUntil = millis() + 2000; wasReacting = true;
     }
     lastButton1 = button1;
-
-    if (millis() < reactionUntil) {
-        delay(10);
-        return;
-    }
-
-    if (wasReacting) {
-        Serial.println(">>> REAZIONE FINITA");
-        behavior.setState(tiredMode ? RobotState::STATE_TIRED : RobotState::STATE_NORMAL);
-        applyBehaviorState();
-        wasReacting = false;
-    }
+    if (millis() < reactionUntil) { delay(10); return; }
+    if (wasReacting) { Serial.println(">>> REAZIONE FINITA"); behavior.setState(tiredMode ? RobotState::STATE_TIRED : RobotState::STATE_NORMAL); applyBehaviorState(); wasReacting = false; }
 
     bool button2 = digitalRead(BUTTON_PIN_2);
     if (lastButton2 == HIGH && button2 == LOW) {
-        tiredMode = !tiredMode;
-        behavior.interaction();
-        if (tiredMode) {
-            Serial.println(">>> MODALITA' TIRED ON");
-            behavior.setState(RobotState::STATE_TIRED);
-        } else {
-            Serial.println(">>> MODALITA' TIRED OFF");
-            behavior.setState(RobotState::STATE_NORMAL);
-        }
-        applyBehaviorState();
-        delay(150);
+        tiredMode = !tiredMode; behavior.interaction();
+        if (tiredMode) { Serial.println(">>> MODALITA' TIRED ON"); behavior.setState(RobotState::STATE_TIRED); }
+        else { Serial.println(">>> MODALITA' TIRED OFF"); behavior.setState(RobotState::STATE_NORMAL); }
+        applyBehaviorState(); delay(150);
     }
     lastButton2 = button2;
 
-    sensors_event_t a, g, temp;
-    mpu.getEvent(&a, &g, &temp);
-    float x = a.acceleration.x;
-    float y = a.acceleration.y;
+    sensors_event_t a, g, temp; mpu.getEvent(&a, &g, &temp);
+    float x = a.acceleration.x, y = a.acceleration.y;
     float movimento = abs(g.gyro.x) + abs(g.gyro.y) + abs(g.gyro.z);
-
     if (movimento > 8.0 && !wasShaking) {
-        Serial.println(">>> SCOSSA!");
-        behavior.interaction();
-        behavior.setState(RobotState::STATE_ANGRY, 800);
-        roboEyes.setMood(ANGRY);
-        shakeUntil = millis() + 800;
-        wasShaking = true;
+        Serial.println(">>> SCOSSA!"); behavior.interaction(); behavior.setState(RobotState::STATE_ANGRY, 800);
+        roboEyes.setMood(ANGRY); shakeUntil = millis() + 800; wasShaking = true;
     }
-
     if (wasShaking && millis() > shakeUntil) {
-        wasShaking = false;
-        behavior.setState(tiredMode ? RobotState::STATE_TIRED : RobotState::STATE_NORMAL);
-        applyBehaviorState();
-        Serial.println(">>> SCOSSA FINITA");
+        wasShaking = false; behavior.setState(tiredMode ? RobotState::STATE_TIRED : RobotState::STATE_NORMAL); applyBehaviorState(); Serial.println(">>> SCOSSA FINITA");
     }
 
-    if (behavior.getState() != RobotState::STATE_CURIOUS &&
-        behavior.getState() != RobotState::STATE_SLEEPING) {
+    if (behavior.getState() != RobotState::STATE_CURIOUS && behavior.getState() != RobotState::STATE_SLEEPING) {
         const float threshold = 2.5;
-        bool right = x > threshold;
-        bool left = x < -threshold;
-        bool forward = y < -threshold;
-        bool backward = y > threshold;
-
+        bool right = x > threshold, left = x < -threshold, forward = y < -threshold, backward = y > threshold;
         if (right && backward) roboEyes.setPosition(NE);
         else if (right && forward) roboEyes.setPosition(NW);
         else if (left && backward) roboEyes.setPosition(SE);
