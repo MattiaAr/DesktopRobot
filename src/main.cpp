@@ -33,25 +33,57 @@ unsigned long shakeUntil = 0;
 void applyBehaviorState() {
     switch (behavior.getState()) {
         case RobotState::STATE_NORMAL:
+            roboEyes.open();
+            roboEyes.setCuriosity(OFF);
+            roboEyes.setIdleMode(OFF);
             roboEyes.setMood(DEFAULT);
+            roboEyes.setPosition(DEFAULT);
             break;
+
         case RobotState::STATE_TIRED:
+            roboEyes.open();
+            roboEyes.setCuriosity(OFF);
+            roboEyes.setIdleMode(OFF);
             roboEyes.setMood(TIRED);
+            roboEyes.setPosition(DEFAULT);
             break;
+
         case RobotState::STATE_HAPPY:
+            roboEyes.open();
+            roboEyes.setCuriosity(OFF);
+            roboEyes.setIdleMode(OFF);
             roboEyes.setMood(HAPPY);
             break;
+
         case RobotState::STATE_ANGRY:
+            roboEyes.open();
+            roboEyes.setCuriosity(OFF);
+            roboEyes.setIdleMode(OFF);
             roboEyes.setMood(ANGRY);
             break;
+
         case RobotState::STATE_CURIOUS:
+            // Occhi normali ma curiosi: guardano autonomamente in giro.
+            roboEyes.open();
             roboEyes.setMood(DEFAULT);
+            roboEyes.setCuriosity(ON);
+            roboEyes.setIdleMode(ON, 1, 1);
             break;
+
         case RobotState::STATE_BORED:
+            // Occhi stanchi e fermi.
+            roboEyes.open();
+            roboEyes.setCuriosity(OFF);
+            roboEyes.setIdleMode(OFF);
             roboEyes.setMood(TIRED);
+            roboEyes.setPosition(S);
             break;
+
         case RobotState::STATE_SLEEPING:
-            roboEyes.setMood(TIRED);
+            // Occhi chiusi: stato realmente distinto da BORED.
+            roboEyes.setCuriosity(OFF);
+            roboEyes.setIdleMode(OFF);
+            roboEyes.close();
             break;
     }
 }
@@ -206,32 +238,38 @@ void loop() {
 
     // ==================================================
     // DIREZIONE MPU
+    // In CURIOUS lasciamo a RoboEyes il controllo autonomo.
+    // In SLEEPING lasciamo gli occhi chiusi.
     // ==================================================
-    const float threshold = 2.5;
+    if (behavior.getState() != RobotState::STATE_CURIOUS &&
+        behavior.getState() != RobotState::STATE_SLEEPING) {
 
-    bool right = x > threshold;
-    bool left = x < -threshold;
-    bool forward = y < -threshold;
-    bool backward = y > threshold;
+        const float threshold = 2.5;
 
-    if (right && backward) {
-        roboEyes.setPosition(NE);
-    } else if (right && forward) {
-        roboEyes.setPosition(NW);
-    } else if (left && backward) {
-        roboEyes.setPosition(SE);
-    } else if (left && forward) {
-        roboEyes.setPosition(SW);
-    } else if (right) {
-        roboEyes.setPosition(N);
-    } else if (left) {
-        roboEyes.setPosition(S);
-    } else if (backward) {
-        roboEyes.setPosition(E);
-    } else if (forward) {
-        roboEyes.setPosition(W);
-    } else {
-        roboEyes.setPosition(DEFAULT);
+        bool right = x > threshold;
+        bool left = x < -threshold;
+        bool forward = y < -threshold;
+        bool backward = y > threshold;
+
+        if (right && backward) {
+            roboEyes.setPosition(NE);
+        } else if (right && forward) {
+            roboEyes.setPosition(NW);
+        } else if (left && backward) {
+            roboEyes.setPosition(SE);
+        } else if (left && forward) {
+            roboEyes.setPosition(SW);
+        } else if (right) {
+            roboEyes.setPosition(N);
+        } else if (left) {
+            roboEyes.setPosition(S);
+        } else if (backward) {
+            roboEyes.setPosition(E);
+        } else if (forward) {
+            roboEyes.setPosition(W);
+        } else {
+            roboEyes.setPosition(DEFAULT);
+        }
     }
 
     delay(20);
