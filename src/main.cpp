@@ -23,6 +23,7 @@ RoboEyes<Adafruit_SSD1306> roboEyes(display);
 BehaviorEngine behavior;
 Servo headServo;
 
+bool servoDetected = false;
 bool lastButton1 = HIGH;
 bool lastButton2 = HIGH;
 bool tiredMode = false;
@@ -46,12 +47,7 @@ void applyBehaviorState() {
         case RobotState::STATE_BORED:
             roboEyes.open(); roboEyes.setAutoblinker(ON, 3, 2); roboEyes.setCuriosity(OFF); roboEyes.setIdleMode(OFF); roboEyes.setMood(TIRED); roboEyes.setPosition(S); break;
         case RobotState::STATE_SLEEPING:
-            // Disable the automatic blinker: otherwise RoboEyes reopens the eyes after close().
-            roboEyes.setAutoblinker(OFF);
-            roboEyes.setCuriosity(OFF);
-            roboEyes.setIdleMode(OFF);
-            roboEyes.close();
-            break;
+            roboEyes.setAutoblinker(OFF); roboEyes.setCuriosity(OFF); roboEyes.setIdleMode(OFF); roboEyes.close(); break;
     }
 }
 
@@ -85,18 +81,26 @@ void setup() {
     roboEyes.setIdleMode(OFF); roboEyes.setMood(DEFAULT); roboEyes.setPosition(DEFAULT);
     pinMode(BUTTON_PIN_1, INPUT_PULLUP); pinMode(BUTTON_PIN_2, INPUT_PULLUP);
 
-    // Servo on GPIO18. Power comes from the Shield; GPIO18 carries only the signal.
+    // A servo is not electrically detectable through GPIO18 alone.
+    // We can verify that GPIO18 can drive the servo signal, then observe its response.
     headServo.setPeriodHertz(50);
-    headServo.attach(SERVO_PIN, 500, 2400);
-    headServo.write(90);
-    Serial.println("SERVO GPIO18 OK - posizione centrale");
-    delay(500);
-    headServo.write(75);
-    delay(300);
-    headServo.write(105);
-    delay(300);
-    headServo.write(90);
-    Serial.println("SERVO TEST AVVIO COMPLETATO");
+    servoDetected = headServo.attach(SERVO_PIN, 500, 2400);
+
+    if (servoDetected) {
+        Serial.println("SERVO: attach GPIO18 RIUSCITO");
+        Serial.println("SERVO: test movimento 90 -> 75 -> 105 -> 90");
+        headServo.write(90);
+        delay(500);
+        headServo.write(75);
+        delay(300);
+        headServo.write(105);
+        delay(300);
+        headServo.write(90);
+        Serial.println("SERVO: test avvio completato");
+    } else {
+        Serial.println("SERVO: attach GPIO18 FALLITO");
+        Serial.println("SERVO: nessun segnale PWM disponibile su GPIO18");
+    }
 
     behavior.begin();
     Serial.println("PULSANTE 1 -> GPIO19"); Serial.println("PULSANTE 2 -> GPIO23");
