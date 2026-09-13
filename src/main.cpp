@@ -81,13 +81,17 @@ void setup() {
     roboEyes.setIdleMode(OFF); roboEyes.setMood(DEFAULT); roboEyes.setPosition(DEFAULT);
     pinMode(BUTTON_PIN_1, INPUT_PULLUP); pinMode(BUTTON_PIN_2, INPUT_PULLUP);
 
-    // A servo is not electrically detectable through GPIO18 alone.
-    // We can verify that GPIO18 can drive the servo signal, then observe its response.
+    // GPIO18 is a valid servo pin on a classic ESP32.
+    // attach() returns the PWM channel number; channel 0 is also a valid success value.
     headServo.setPeriodHertz(50);
-    servoDetected = headServo.attach(SERVO_PIN, 500, 2400);
+    int servoChannel = headServo.attach(SERVO_PIN, 500, 2400);
+    servoDetected = headServo.attached();
+
+    Serial.print("SERVO: GPIO18 attach channel = ");
+    Serial.println(servoChannel);
 
     if (servoDetected) {
-        Serial.println("SERVO: attach GPIO18 RIUSCITO");
+        Serial.println("SERVO: GPIO18 ATTACH RIUSCITO");
         Serial.println("SERVO: test movimento 90 -> 75 -> 105 -> 90");
         headServo.write(90);
         delay(500);
@@ -98,8 +102,8 @@ void setup() {
         headServo.write(90);
         Serial.println("SERVO: test avvio completato");
     } else {
-        Serial.println("SERVO: attach GPIO18 FALLITO");
-        Serial.println("SERVO: nessun segnale PWM disponibile su GPIO18");
+        Serial.println("SERVO: GPIO18 ATTACH FALLITO");
+        Serial.println("SERVO: nessun PWM configurato su GPIO18");
     }
 
     behavior.begin();
