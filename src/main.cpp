@@ -107,7 +107,7 @@ void setup() {
     }
 
     behavior.begin();
-    Serial.println("PULSANTE 1 -> GPIO19"); Serial.println("PULSANTE 2 -> GPIO23");
+    Serial.println("PULSANTE 1 -> GPIO19 (SERVO 0 -> 180 -> 0)"); Serial.println("PULSANTE 2 -> GPIO23");
     Serial.println("Behavior Engine OK!"); Serial.println("ROBOT PRONTO!");
 }
 
@@ -117,12 +117,19 @@ void loop() {
 
     bool button1 = digitalRead(BUTTON_PIN_1);
     if (lastButton1 == HIGH && button1 == LOW) {
-        Serial.println(">>> PULSANTE 1 -> FELICE!"); behavior.interaction(); behavior.setState(RobotState::STATE_HAPPY, 2000);
-        roboEyes.setMood(HAPPY); roboEyes.anim_laugh(); reactionUntil = millis() + 2000; wasReacting = true;
+        Serial.println(">>> PULSANTE 1 -> SERVO 0 -> 180 -> 0!");
+        behavior.interaction();
+        if (servoDetected) {
+            headServo.write(0);
+            delay(700);
+            headServo.write(180);
+            delay(700);
+            headServo.write(0);
+            delay(300);
+        }
+        Serial.println(">>> MOVIMENTO SERVO FINITO");
     }
     lastButton1 = button1;
-    if (millis() < reactionUntil) { delay(10); return; }
-    if (wasReacting) { Serial.println(">>> REAZIONE FINITA"); behavior.setState(tiredMode ? RobotState::STATE_TIRED : RobotState::STATE_NORMAL); applyBehaviorState(); wasReacting = false; }
 
     bool button2 = digitalRead(BUTTON_PIN_2);
     if (lastButton2 == HIGH && button2 == LOW) {
