@@ -5,12 +5,14 @@
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 #include <FluxGarage_RoboEyes.h>
+#include <ESP32Servo.h>
 #include "BehaviorEngine.h"
 
 #define SDA_PIN 21
 #define SCL_PIN 22
 #define BUTTON_PIN_1 19
 #define BUTTON_PIN_2 23
+#define SERVO_PIN 18
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_ADDR 0x3C
@@ -19,6 +21,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 Adafruit_MPU6050 mpu;
 RoboEyes<Adafruit_SSD1306> roboEyes(display);
 BehaviorEngine behavior;
+Servo headServo;
 
 bool lastButton1 = HIGH;
 bool lastButton2 = HIGH;
@@ -67,7 +70,7 @@ void printBehaviorState() {
 
 void setup() {
     Serial.begin(115200); delay(1000);
-    Serial.println(); Serial.println("=== DESKTOP ROBOT v0.2 ===");
+    Serial.println(); Serial.println("=== DESKTOP ROBOT v0.3 SERVO TEST ===");
     Wire.begin(SDA_PIN, SCL_PIN); Wire.setClock(100000);
     if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) { Serial.println("ERRORE OLED!"); while (true) delay(1000); }
     Serial.println("OLED OK!");
@@ -76,10 +79,25 @@ void setup() {
     mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
     mpu.setGyroRange(MPU6050_RANGE_500_DEG);
     mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+
     roboEyes.begin(SCREEN_WIDTH, SCREEN_HEIGHT, 100);
     roboEyes.setAutoblinker(ON, 3, 2);
     roboEyes.setIdleMode(OFF); roboEyes.setMood(DEFAULT); roboEyes.setPosition(DEFAULT);
     pinMode(BUTTON_PIN_1, INPUT_PULLUP); pinMode(BUTTON_PIN_2, INPUT_PULLUP);
+
+    // Servo on GPIO18. Power comes from the Shield; GPIO18 carries only the signal.
+    headServo.setPeriodHertz(50);
+    headServo.attach(SERVO_PIN, 500, 2400);
+    headServo.write(90);
+    Serial.println("SERVO GPIO18 OK - posizione centrale");
+    delay(500);
+    headServo.write(75);
+    delay(300);
+    headServo.write(105);
+    delay(300);
+    headServo.write(90);
+    Serial.println("SERVO TEST AVVIO COMPLETATO");
+
     behavior.begin();
     Serial.println("PULSANTE 1 -> GPIO19"); Serial.println("PULSANTE 2 -> GPIO23");
     Serial.println("Behavior Engine OK!"); Serial.println("ROBOT PRONTO!");
