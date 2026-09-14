@@ -328,27 +328,41 @@ void handleInput() {
 void drawRobot() {
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
+
+  // Direzione fisica del robot.
+  // Manteniamo la mappatura già usata da RoboEyes:
+  // Destra -> occhi SU
+  // Sinistra -> occhi GIU
+  // Indietro -> occhi DESTRA
+  // Avanti -> occhi SINISTRA
   float x = a.acceleration.x, y = a.acceleration.y;
   const float threshold = 2.5;
-  int dirX = x > threshold ? 1 : (x < -threshold ? -1 : 0);
-  int dirY = y > threshold ? 1 : (y < -threshold ? -1 : 0);
+  int sensorX = x > threshold ? 1 : (x < -threshold ? -1 : 0);
+  int sensorY = y > threshold ? 1 : (y < -threshold ? -1 : 0);
 
   if (eyeModelIndex == EYE_CLASSIC) {
     roboEyes.update();
-    if (dirX > 0 && dirY > 0) roboEyes.setPosition(NE);
-    else if (dirX > 0 && dirY < 0) roboEyes.setPosition(NW);
-    else if (dirX < 0 && dirY > 0) roboEyes.setPosition(SE);
-    else if (dirX < 0 && dirY < 0) roboEyes.setPosition(SW);
-    else if (dirX > 0) roboEyes.setPosition(N);
-    else if (dirX < 0) roboEyes.setPosition(S);
-    else if (dirY > 0) roboEyes.setPosition(E);
-    else if (dirY < 0) roboEyes.setPosition(W);
+    if (sensorX > 0 && sensorY > 0) roboEyes.setPosition(NE);
+    else if (sensorX > 0 && sensorY < 0) roboEyes.setPosition(NW);
+    else if (sensorX < 0 && sensorY > 0) roboEyes.setPosition(SE);
+    else if (sensorX < 0 && sensorY < 0) roboEyes.setPosition(SW);
+    else if (sensorX > 0) roboEyes.setPosition(N);
+    else if (sensorX < 0) roboEyes.setPosition(S);
+    else if (sensorY > 0) roboEyes.setPosition(E);
+    else if (sensorY < 0) roboEyes.setPosition(W);
     else roboEyes.setPosition(DEFAULT);
   } else {
+    // I modelli custom devono usare la STESSA mappatura:
+    // sensore X (destra/sinistra) -> movimento verticale occhi
+    // sensore Y (indietro/avanti) -> movimento orizzontale occhi
+    int eyeX = sensorY;   // indietro = destra, avanti = sinistra
+    int eyeY = -sensorX;  // destra = su, sinistra = giu
+
     display.clearDisplay();
-    drawCustomEyes(dirX, dirY);
+    drawCustomEyes(eyeX, eyeY);
     display.display();
   }
+
   delay(20);
 }
 
@@ -441,7 +455,10 @@ void applyEyeExpression() {
 }
 
 void drawCustomEyes(float dirX, float dirY) {
-  int pupilX = (int)(dirX * 4), pupilY = (int)(dirY * 3);
+  // Movimento volutamente evidente su OLED 128x64.
+  // I valori arrivano già nella coordinata degli occhi.
+  int pupilX = (int)(dirX * 7);
+  int pupilY = (int)(dirY * 5);
   if (eyeModelIndex == EYE_ROUND) drawEyePair(27, 72, 27, 28, 25, pupilX, pupilY, true, false);
   else if (eyeModelIndex == EYE_SQUARE) drawEyePair(25, 73, 27, 30, 25, pupilX, pupilY, false, false);
   else if (eyeModelIndex == EYE_PIXEL) {
