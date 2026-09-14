@@ -45,8 +45,9 @@ bool lastDown = HIGH;
 bool lastBack = HIGH;
 bool lastSelect = HIGH;
 
+// Debounce ridotto per rendere i pulsanti piu reattivi.
+const unsigned long INPUT_DEBOUNCE = 60;
 unsigned long lastInputTime = 0;
-const unsigned long INPUT_DEBOUNCE = 180;
 
 void drawMenu();
 void drawInfoScreen(const char* title, const char* line1, const char* line2);
@@ -216,11 +217,8 @@ void drawMenu() {
         int y = 16 + (i * 11);
 
         display.setCursor(8, y);
-        if (i == menuIndex) {
-            display.print(">");
-        } else {
-            display.print(" ");
-        }
+        if (i == menuIndex) display.print(">");
+        else display.print(" ");
 
         display.setCursor(20, y);
         display.println(menuLabels[i]);
@@ -238,7 +236,6 @@ void drawInfoScreen(const char* title, const char* line1, const char* line2) {
     display.println(title);
     display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
 
-    display.setTextSize(1);
     display.setCursor(8, 25);
     display.println(line1);
     display.setCursor(8, 40);
