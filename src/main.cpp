@@ -13,8 +13,10 @@
 #define SDA_PIN 21
 #define SCL_PIN 22
 
-#define BUTTON_PIN_1 19
-#define BUTTON_PIN_2 23
+#define BUTTON_PIN_1 19  // Bianco
+#define BUTTON_PIN_2 23  // Rosso
+#define BUTTON_PIN_3 18  // Blu
+#define BUTTON_PIN_4 5   // Nero
 
 // ==================================================
 // OLED
@@ -38,6 +40,8 @@ RoboEyes<Adafruit_SSD1306> roboEyes(display);
 
 bool lastButton1 = HIGH;
 bool lastButton2 = HIGH;
+bool lastButton3 = HIGH;
+bool lastButton4 = HIGH;
 
 // ==================================================
 // STATO ROBOT
@@ -49,7 +53,6 @@ bool wasShaking = false;
 
 unsigned long reactionUntil = 0;
 unsigned long shakeUntil = 0;
-
 
 // ==================================================
 // SETUP
@@ -70,15 +73,12 @@ void setup() {
     Wire.begin(SDA_PIN, SCL_PIN);
     Wire.setClock(100000);
 
-
     // ------------------------------------------------
     // OLED
     // ------------------------------------------------
 
     if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
-
         Serial.println("ERRORE OLED!");
-
         while (true) {
             delay(1000);
         }
@@ -86,15 +86,12 @@ void setup() {
 
     Serial.println("OLED OK!");
 
-
     // ------------------------------------------------
     // MPU-6050
     // ------------------------------------------------
 
     if (!mpu.begin(0x68, &Wire)) {
-
         Serial.println("ERRORE MPU!");
-
         while (true) {
             delay(1000);
         }
@@ -106,19 +103,15 @@ void setup() {
     mpu.setGyroRange(MPU6050_RANGE_500_DEG);
     mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
 
-
     // ------------------------------------------------
     // ROBO EYES
     // ------------------------------------------------
 
     roboEyes.begin(SCREEN_WIDTH, SCREEN_HEIGHT, 100);
-
     roboEyes.setAutoblinker(ON, 3, 2);
     roboEyes.setIdleMode(OFF);
-
     roboEyes.setMood(DEFAULT);
     roboEyes.setPosition(DEFAULT);
-
 
     // ------------------------------------------------
     // PULSANTI
@@ -126,14 +119,15 @@ void setup() {
 
     pinMode(BUTTON_PIN_1, INPUT_PULLUP);
     pinMode(BUTTON_PIN_2, INPUT_PULLUP);
+    pinMode(BUTTON_PIN_3, INPUT_PULLUP);
+    pinMode(BUTTON_PIN_4, INPUT_PULLUP);
 
-
-    Serial.println("PULSANTE 1 -> GPIO19");
-    Serial.println("PULSANTE 2 -> GPIO23");
-
+    Serial.println("PULSANTE BIANCO -> GPIO19");
+    Serial.println("PULSANTE ROSSO  -> GPIO23");
+    Serial.println("PULSANTE BLU    -> GPIO18");
+    Serial.println("PULSANTE NERO   -> GPIO5");
     Serial.println("ROBOT PRONTO!");
 }
-
 
 // ==================================================
 // LOOP
@@ -144,86 +138,84 @@ void loop() {
     // RoboEyes deve essere aggiornato continuamente
     roboEyes.update();
 
-
     // ==================================================
-    // PULSANTE 1 -> HAPPY
+    // LETTURA PULSANTI
     // ==================================================
 
     bool button1 = digitalRead(BUTTON_PIN_1);
+    bool button2 = digitalRead(BUTTON_PIN_2);
+    bool button3 = digitalRead(BUTTON_PIN_3);
+    bool button4 = digitalRead(BUTTON_PIN_4);
+
+    // --------------------------------------------------
+    // BIANCO -> HAPPY
+    // --------------------------------------------------
 
     if (lastButton1 == HIGH && button1 == LOW) {
-
-        Serial.println(">>> PULSANTE 1 -> FELICE!");
-
+        Serial.println(">>> BIANCO GPIO19 -> PREMUTO");
         roboEyes.setMood(HAPPY);
         roboEyes.anim_laugh();
-
         reactionUntil = millis() + 2000;
         wasReacting = true;
     }
 
-    lastButton1 = button1;
-
-
     // --------------------------------------------------
-    // Durante la reazione al pulsante 1
+    // ROSSO -> TIRED ON/OFF
     // --------------------------------------------------
 
-    if (millis() < reactionUntil) {
+    if (lastButton2 == HIGH && button2 == LOW) {
+        tiredMode = !tiredMode;
 
-        delay(10);
-        return;
+        if (tiredMode) {
+            Serial.println(">>> ROSSO GPIO23 -> PREMUTO / TIRED ON");
+            roboEyes.setMood(TIRED);
+        } else {
+            Serial.println(">>> ROSSO GPIO23 -> PREMUTO / TIRED OFF");
+            roboEyes.setMood(DEFAULT);
+        }
     }
 
+    // --------------------------------------------------
+    // BLU -> ANGRY
+    // --------------------------------------------------
+
+    if (lastButton3 == HIGH && button3 == LOW) {
+        Serial.println(">>> BLU GPIO18 -> PREMUTO");
+        roboEyes.setMood(ANGRY);
+        reactionUntil = millis() + 1000;
+        wasReacting = true;
+    }
+
+    // --------------------------------------------------
+    // NERO -> DEFAULT
+    // --------------------------------------------------
+
+    if (lastButton4 == HIGH && button4 == LOW) {
+        Serial.println(">>> NERO GPIO5 -> PREMUTO");
+        roboEyes.setMood(DEFAULT);
+        reactionUntil = millis() + 1000;
+        wasReacting = true;
+    }
+
+    lastButton1 = button1;
+    lastButton2 = button2;
+    lastButton3 = button3;
+    lastButton4 = button4;
 
     // --------------------------------------------------
     // Fine reazione
     // --------------------------------------------------
 
-    if (wasReacting) {
-
-        Serial.println(">>> REAZIONE FINITA");
-
+    if (wasReacting && millis() >= reactionUntil) {
         if (tiredMode) {
             roboEyes.setMood(TIRED);
-        }
-        else {
+        } else {
             roboEyes.setMood(DEFAULT);
         }
 
         wasReacting = false;
+        Serial.println(">>> REAZIONE FINITA");
     }
-
-
-    // ==================================================
-    // PULSANTE 2 -> TIRED ON/OFF
-    // ==================================================
-
-    bool button2 = digitalRead(BUTTON_PIN_2);
-
-    if (lastButton2 == HIGH && button2 == LOW) {
-
-        tiredMode = !tiredMode;
-
-        if (tiredMode) {
-
-            Serial.println(">>> MODALITA' TIRED ON");
-
-            roboEyes.setMood(TIRED);
-        }
-        else {
-
-            Serial.println(">>> MODALITA' TIRED OFF");
-
-            roboEyes.setMood(DEFAULT);
-        }
-
-        // Piccolo debounce
-        delay(150);
-    }
-
-    lastButton2 = button2;
-
 
     // ==================================================
     // LETTURA MPU
@@ -242,7 +234,6 @@ void loop() {
     float gyroY = g.gyro.y;
     float gyroZ = g.gyro.z;
 
-
     // ==================================================
     // RILEVAMENTO SCOSSA
     // ==================================================
@@ -252,36 +243,23 @@ void loop() {
         abs(gyroY) +
         abs(gyroZ);
 
-
     if (movimento > 8.0 && !wasShaking) {
-
         Serial.println(">>> SCOSSA!");
-
         roboEyes.setMood(ANGRY);
-
         shakeUntil = millis() + 800;
         wasShaking = true;
     }
 
-
-    // --------------------------------------------------
-    // Fine scossa
-    // --------------------------------------------------
-
     if (wasShaking && millis() > shakeUntil) {
-
         if (tiredMode) {
             roboEyes.setMood(TIRED);
-        }
-        else {
+        } else {
             roboEyes.setMood(DEFAULT);
         }
 
         wasShaking = false;
-
         Serial.println(">>> SCOSSA FINITA");
     }
-
 
     // ==================================================
     // DIREZIONE MPU
@@ -289,116 +267,42 @@ void loop() {
 
     const float threshold = 2.5;
 
-    bool right =
-        x > threshold;
-
-    bool left =
-        x < -threshold;
-
-    bool forward =
-        y < -threshold;
-
-    bool backward =
-        y > threshold;
-
+    bool right = x > threshold;
+    bool left = x < -threshold;
+    bool forward = y < -threshold;
+    bool backward = y > threshold;
 
     // ==================================================
     // MAPPA OCCHI
     // ==================================================
 
-    // ----------------------------------------------
-    // Destra + Indietro -> NE
-    // ----------------------------------------------
-
     if (right && backward) {
-
         roboEyes.setPosition(NE);
     }
-
-
-    // ----------------------------------------------
-    // Destra + Avanti -> NW
-    // ----------------------------------------------
-
     else if (right && forward) {
-
         roboEyes.setPosition(NW);
     }
-
-
-    // ----------------------------------------------
-    // Sinistra + Indietro -> SE
-    // ----------------------------------------------
-
     else if (left && backward) {
-
         roboEyes.setPosition(SE);
     }
-
-
-    // ----------------------------------------------
-    // Sinistra + Avanti -> SW
-    // ----------------------------------------------
-
     else if (left && forward) {
-
         roboEyes.setPosition(SW);
     }
-
-
-    // ----------------------------------------------
-    // Destra -> SU
-    // ----------------------------------------------
-
     else if (right) {
-
         roboEyes.setPosition(N);
     }
-
-
-    // ----------------------------------------------
-    // Sinistra -> GIU
-    // ----------------------------------------------
-
     else if (left) {
-
         roboEyes.setPosition(S);
     }
-
-
-    // ----------------------------------------------
-    // Indietro -> DESTRA
-    // ----------------------------------------------
-
     else if (backward) {
-
         roboEyes.setPosition(E);
     }
-
-
-    // ----------------------------------------------
-    // Avanti -> SINISTRA
-    // ----------------------------------------------
-
     else if (forward) {
-
         roboEyes.setPosition(W);
     }
-
-
-    // ----------------------------------------------
-    // Fermo -> CENTRO
-    // ----------------------------------------------
-
     else {
-
         roboEyes.setPosition(DEFAULT);
     }
-
-
-    // ==================================================
-    // PICCOLA PAUSA
-    // ==================================================
 
     delay(20);
 }
