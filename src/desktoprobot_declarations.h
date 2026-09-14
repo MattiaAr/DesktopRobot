@@ -1,5 +1,5 @@
 #pragma once
 
-void debugMenuCombo();
+void handleMenuHold();
 void handleInput();
 void drawRobot();
