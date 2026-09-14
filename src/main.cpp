@@ -9,10 +9,10 @@
 #define SDA_PIN 21
 #define SCL_PIN 22
 
-#define BUTTON_PIN_1 19  // Bianco
-#define BUTTON_PIN_2 23  // Rosso
-#define BUTTON_PIN_3 18  // Blu
-#define BUTTON_PIN_4 5   // Nero
+#define BUTTON_UP 19       // Bianco
+#define BUTTON_DOWN 23     // Rosso
+#define BUTTON_BACK 18     // Blu
+#define BUTTON_SELECT 5    // Nero
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -22,24 +22,55 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 Adafruit_MPU6050 mpu;
 RoboEyes<Adafruit_SSD1306> roboEyes(display);
 
-bool lastButton1 = HIGH;
-bool lastButton2 = HIGH;
-bool lastButton3 = HIGH;
-bool lastButton4 = HIGH;
+enum Screen {
+    MENU,
+    GAMES,
+    ROBOT,
+    SETTINGS,
+    SYSTEM_INFO
+};
 
-bool tiredMode = false;
-bool wasReacting = false;
-bool wasShaking = false;
+Screen currentScreen = MENU;
+int menuIndex = 0;
+const int menuItems = 4;
+const char* menuLabels[menuItems] = {
+    "GIOCHI",
+    "ROBOT",
+    "IMPOSTAZIONI",
+    "SISTEMA"
+};
 
-unsigned long reactionUntil = 0;
-unsigned long shakeUntil = 0;
+bool lastUp = HIGH;
+bool lastDown = HIGH;
+bool lastBack = HIGH;
+bool lastSelect = HIGH;
+
+unsigned long lastInputTime = 0;
+const unsigned long INPUT_DEBOUNCE = 180;
+
+void drawMenu();
+void drawInfoScreen(const char* title, const char* line1, const char* line2);
+void handleInput();
+void enterSelectedItem();
+
+bool buttonPressed(int pin, bool &lastState) {
+    bool state = digitalRead(pin);
+    bool pressed = (lastState == HIGH && state == LOW);
+    lastState = state;
+
+    if (pressed && millis() - lastInputTime >= INPUT_DEBOUNCE) {
+        lastInputTime = millis();
+        return true;
+    }
+    return false;
+}
 
 void setup() {
     Serial.begin(115200);
     delay(1000);
 
     Serial.println();
-    Serial.println("=== DESKTOP ROBOT ===");
+    Serial.println("=== DESKTOP ROBOT OS v0.3 ===");
 
     Wire.begin(SDA_PIN, SCL_PIN);
     Wire.setClock(100000);
@@ -48,14 +79,12 @@ void setup() {
         Serial.println("ERRORE OLED!");
         while (true) delay(1000);
     }
-
     Serial.println("OLED OK!");
 
     if (!mpu.begin(0x68, &Wire)) {
         Serial.println("ERRORE MPU!");
         while (true) delay(1000);
     }
-
     Serial.println("MPU OK!");
 
     mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
@@ -68,111 +97,155 @@ void setup() {
     roboEyes.setMood(DEFAULT);
     roboEyes.setPosition(DEFAULT);
 
-    pinMode(BUTTON_PIN_1, INPUT_PULLUP);
-    pinMode(BUTTON_PIN_2, INPUT_PULLUP);
-    pinMode(BUTTON_PIN_3, INPUT_PULLUP);
-    pinMode(BUTTON_PIN_4, INPUT_PULLUP);
+    pinMode(BUTTON_UP, INPUT_PULLUP);
+    pinMode(BUTTON_DOWN, INPUT_PULLUP);
+    pinMode(BUTTON_BACK, INPUT_PULLUP);
+    pinMode(BUTTON_SELECT, INPUT_PULLUP);
 
-    Serial.println("PULSANTE BIANCO -> GPIO19");
-    Serial.println("PULSANTE ROSSO  -> GPIO23");
-    Serial.println("PULSANTE BLU    -> GPIO18");
-    Serial.println("PULSANTE NERO   -> GPIO5");
-    Serial.println("ROBOT PRONTO!");
+    Serial.println("BIANCO GPIO19 -> SU");
+    Serial.println("ROSSO GPIO23  -> GIU");
+    Serial.println("BLU GPIO18    -> INDIETRO");
+    Serial.println("NERO GPIO5    -> SELEZIONA");
+    Serial.println("OS PRONTO!");
+
+    drawMenu();
 }
 
 void loop() {
-    roboEyes.update();
+    handleInput();
 
-    bool button1 = digitalRead(BUTTON_PIN_1);
-    bool button2 = digitalRead(BUTTON_PIN_2);
-    bool button3 = digitalRead(BUTTON_PIN_3);
-    bool button4 = digitalRead(BUTTON_PIN_4);
+    if (currentScreen == ROBOT) {
+        roboEyes.update();
 
-    if (lastButton1 == HIGH && button1 == LOW) {
-        Serial.println(">>> BIANCO GPIO19 -> PREMUTO");
-        roboEyes.setMood(HAPPY);
-        roboEyes.anim_laugh();
-        reactionUntil = millis() + 2000;
-        wasReacting = true;
+        sensors_event_t a, g, temp;
+        mpu.getEvent(&a, &g, &temp);
+
+        float x = a.acceleration.x;
+        float y = a.acceleration.y;
+        const float threshold = 2.5;
+
+        bool right = x > threshold;
+        bool left = x < -threshold;
+        bool forward = y < -threshold;
+        bool backward = y > threshold;
+
+        if (right && backward) roboEyes.setPosition(NE);
+        else if (right && forward) roboEyes.setPosition(NW);
+        else if (left && backward) roboEyes.setPosition(SE);
+        else if (left && forward) roboEyes.setPosition(SW);
+        else if (right) roboEyes.setPosition(N);
+        else if (left) roboEyes.setPosition(S);
+        else if (backward) roboEyes.setPosition(E);
+        else if (forward) roboEyes.setPosition(W);
+        else roboEyes.setPosition(DEFAULT);
+
+        delay(20);
     }
+}
 
-    if (lastButton2 == HIGH && button2 == LOW) {
-        tiredMode = !tiredMode;
-        if (tiredMode) {
-            Serial.println(">>> ROSSO GPIO23 -> PREMUTO / TIRED ON");
-            roboEyes.setMood(TIRED);
-        } else {
-            Serial.println(">>> ROSSO GPIO23 -> PREMUTO / TIRED OFF");
-            roboEyes.setMood(DEFAULT);
+void handleInput() {
+    bool up = buttonPressed(BUTTON_UP, lastUp);
+    bool down = buttonPressed(BUTTON_DOWN, lastDown);
+    bool back = buttonPressed(BUTTON_BACK, lastBack);
+    bool select = buttonPressed(BUTTON_SELECT, lastSelect);
+
+    if (currentScreen == MENU) {
+        if (up) {
+            menuIndex--;
+            if (menuIndex < 0) menuIndex = menuItems - 1;
+            drawMenu();
+        }
+
+        if (down) {
+            menuIndex++;
+            if (menuIndex >= menuItems) menuIndex = 0;
+            drawMenu();
+        }
+
+        if (select) {
+            enterSelectedItem();
+        }
+    } else {
+        if (back) {
+            currentScreen = MENU;
+            drawMenu();
         }
     }
+}
 
-    if (lastButton3 == HIGH && button3 == LOW) {
-        Serial.println(">>> BLU GPIO18 -> PREMUTO");
-        roboEyes.setMood(ANGRY);
-        reactionUntil = millis() + 1000;
-        wasReacting = true;
+void enterSelectedItem() {
+    switch (menuIndex) {
+        case 0:
+            currentScreen = GAMES;
+            drawInfoScreen("GIOCHI", "Nessun gioco", "in questa versione");
+            Serial.println("> GIOCHI");
+            break;
+
+        case 1:
+            currentScreen = ROBOT;
+            Serial.println("> ROBOT");
+            roboEyes.setMood(DEFAULT);
+            roboEyes.setPosition(DEFAULT);
+            break;
+
+        case 2:
+            currentScreen = SETTINGS;
+            drawInfoScreen("IMPOSTAZIONI", "In sviluppo", "v0.3");
+            Serial.println("> IMPOSTAZIONI");
+            break;
+
+        case 3:
+            currentScreen = SYSTEM_INFO;
+            drawInfoScreen("SISTEMA", "DesktopRobot OS", "Versione 0.3");
+            Serial.println("> SISTEMA");
+            break;
+    }
+}
+
+void drawMenu() {
+    display.clearDisplay();
+    display.setTextColor(SSD1306_WHITE);
+
+    display.setTextSize(1);
+    display.setCursor(24, 0);
+    display.println("DESKTOP ROBOT OS");
+
+    display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
+
+    for (int i = 0; i < menuItems; i++) {
+        int y = 16 + (i * 11);
+
+        display.setCursor(8, y);
+        if (i == menuIndex) {
+            display.print(">");
+        } else {
+            display.print(" ");
+        }
+
+        display.setCursor(20, y);
+        display.println(menuLabels[i]);
     }
 
-    if (lastButton4 == HIGH && button4 == LOW) {
-        Serial.println(">>> NERO GPIO5 -> PREMUTO");
-        roboEyes.setMood(DEFAULT);
-        reactionUntil = millis() + 1000;
-        wasReacting = true;
-    }
+    display.display();
+}
 
-    lastButton1 = button1;
-    lastButton2 = button2;
-    lastButton3 = button3;
-    lastButton4 = button4;
+void drawInfoScreen(const char* title, const char* line1, const char* line2) {
+    display.clearDisplay();
+    display.setTextColor(SSD1306_WHITE);
 
-    if (wasReacting && millis() >= reactionUntil) {
-        if (tiredMode) roboEyes.setMood(TIRED);
-        else roboEyes.setMood(DEFAULT);
-        wasReacting = false;
-        Serial.println(">>> REAZIONE FINITA");
-    }
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println(title);
+    display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
 
-    sensors_event_t a, g, temp;
-    mpu.getEvent(&a, &g, &temp);
+    display.setTextSize(1);
+    display.setCursor(8, 25);
+    display.println(line1);
+    display.setCursor(8, 40);
+    display.println(line2);
 
-    float x = a.acceleration.x;
-    float y = a.acceleration.y;
-    float gyroX = g.gyro.x;
-    float gyroY = g.gyro.y;
-    float gyroZ = g.gyro.z;
+    display.setCursor(8, 55);
+    display.println("BLU = indietro");
 
-    float movimento = abs(gyroX) + abs(gyroY) + abs(gyroZ);
-
-    if (movimento > 8.0 && !wasShaking) {
-        Serial.println(">>> SCOSSA!");
-        roboEyes.setMood(ANGRY);
-        shakeUntil = millis() + 800;
-        wasShaking = true;
-    }
-
-    if (wasShaking && millis() > shakeUntil) {
-        if (tiredMode) roboEyes.setMood(TIRED);
-        else roboEyes.setMood(DEFAULT);
-        wasShaking = false;
-        Serial.println(">>> SCOSSA FINITA");
-    }
-
-    const float threshold = 2.5;
-    bool right = x > threshold;
-    bool left = x < -threshold;
-    bool forward = y < -threshold;
-    bool backward = y > threshold;
-
-    if (right && backward) roboEyes.setPosition(NE);
-    else if (right && forward) roboEyes.setPosition(NW);
-    else if (left && backward) roboEyes.setPosition(SE);
-    else if (left && forward) roboEyes.setPosition(SW);
-    else if (right) roboEyes.setPosition(N);
-    else if (left) roboEyes.setPosition(S);
-    else if (backward) roboEyes.setPosition(E);
-    else if (forward) roboEyes.setPosition(W);
-    else roboEyes.setPosition(DEFAULT);
-
-    delay(20);
+    display.display();
 }
