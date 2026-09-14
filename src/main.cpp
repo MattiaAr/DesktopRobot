@@ -59,15 +59,20 @@ int controlIndex = 0;
 const char* soundLabels[] = {"VOLUME", "SUONI UI", "REAZIONI"};
 int soundIndex = 0;
 
-enum EyeModel { EYE_CLASSIC, EYE_ROUND, EYE_SQUARE, EYE_PIXEL, EYE_CYBER, EYE_CUTE, EYE_MINIMAL };
-const int EYE_MODEL_COUNT = 7;
-const char* eyeModelNames[EYE_MODEL_COUNT] = {"CLASSIC", "ROUND", "SQUARE", "PIXEL", "CYBER", "CUTE", "MINIMAL"};
+enum EyeModel { EYE_CLASSIC, EYE_ROUND, EYE_SQUARE, EYE_PIXEL, EYE_CYBER, EYE_CUTE, EYE_MINIMAL, EYE_COZMO, EYE_ANIME, EYE_ORBIT };
+const int EYE_MODEL_COUNT = 10;
+const char* eyeModelNames[EYE_MODEL_COUNT] = {"CLASSIC", "ROUND", "SQUARE", "PIXEL", "CYBER", "CUTE", "MINIMAL", "COZMO", "ANIME", "ORBIT"};
 int eyeModelIndex = 0;
 
 enum EyeExpression { EXPR_DEFAULT, EXPR_HAPPY, EXPR_ANGRY, EXPR_TIRED, EXPR_CURIOUS };
 const int EYE_EXPRESSION_COUNT = 5;
 const char* eyeExpressionNames[EYE_EXPRESSION_COUNT] = {"DEFAULT", "HAPPY", "ANGRY", "TIRED", "CURIOUS"};
 int eyeExpressionIndex = 0;
+
+float customEyeX = 0.0f, customEyeY = 0.0f;
+unsigned long customBlinkUntil = 0;
+unsigned long customNextBlink = 0;
+bool customBlinking = false;
 
 bool clockEnabled = true;
 int displayBrightness = 255;
@@ -328,13 +333,6 @@ void handleInput() {
 void drawRobot() {
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
-
-  // Direzione fisica del robot.
-  // Manteniamo la mappatura già usata da RoboEyes:
-  // Destra -> occhi SU
-  // Sinistra -> occhi GIU
-  // Indietro -> occhi DESTRA
-  // Avanti -> occhi SINISTRA
   float x = a.acceleration.x, y = a.acceleration.y;
   const float threshold = 2.5;
   int sensorX = x > threshold ? 1 : (x < -threshold ? -1 : 0);
@@ -352,17 +350,12 @@ void drawRobot() {
     else if (sensorY < 0) roboEyes.setPosition(W);
     else roboEyes.setPosition(DEFAULT);
   } else {
-    // I modelli custom devono usare la STESSA mappatura:
-    // sensore X (destra/sinistra) -> movimento verticale occhi
-    // sensore Y (indietro/avanti) -> movimento orizzontale occhi
-    int eyeX = sensorY;   // indietro = destra, avanti = sinistra
-    int eyeY = -sensorX;  // destra = su, sinistra = giu
-
+    int eyeX = sensorY;
+    int eyeY = -sensorX;
     display.clearDisplay();
     drawCustomEyes(eyeX, eyeY);
     display.display();
   }
-
   delay(20);
 }
 
@@ -419,8 +412,19 @@ void drawEyeModelPreview(int index, int cx, int cy, int scale) {
   } else if (index == EYE_CUTE) {
     display.fillRoundRect(left, top, w, h, h / 2, SSD1306_WHITE); display.fillRoundRect(right, top, w, h, h / 2, SSD1306_WHITE);
     display.fillCircle(left + w / 2, cy - 1, max(1, scale), SSD1306_BLACK); display.fillCircle(right + w / 2, cy - 1, max(1, scale), SSD1306_BLACK);
-  } else {
+  } else if (index == EYE_MINIMAL) {
     display.fillRoundRect(left, cy - 2 * scale, w, 4 * scale, 2 * scale, SSD1306_WHITE); display.fillRoundRect(right, cy - 2 * scale, w, 4 * scale, 2 * scale, SSD1306_WHITE);
+  } else if (index == EYE_COZMO) {
+    display.fillRoundRect(left - 2 * scale, top, w + 4 * scale, h + 2 * scale, 5 * scale, SSD1306_WHITE);
+    display.fillRoundRect(right - 2 * scale, top, w + 4 * scale, h + 2 * scale, 5 * scale, SSD1306_WHITE);
+    display.fillCircle(left + w / 2, cy, max(1, scale), SSD1306_BLACK); display.fillCircle(right + w / 2, cy, max(1, scale), SSD1306_BLACK);
+  } else if (index == EYE_ANIME) {
+    display.fillRoundRect(left - 2 * scale, top - 2 * scale, w + 4 * scale, h + 4 * scale, 4 * scale, SSD1306_WHITE);
+    display.fillRoundRect(right - 2 * scale, top - 2 * scale, w + 4 * scale, h + 4 * scale, 4 * scale, SSD1306_WHITE);
+    display.fillCircle(left + w / 2, cy, max(2, 2 * scale), SSD1306_BLACK); display.fillCircle(right + w / 2, cy, max(2, 2 * scale), SSD1306_BLACK);
+  } else {
+    display.drawCircle(left + w / 2, cy, max(3, h / 2), SSD1306_WHITE); display.drawCircle(right + w / 2, cy, max(3, h / 2), SSD1306_WHITE);
+    display.fillCircle(left + w / 2, cy, max(1, scale), SSD1306_WHITE); display.fillCircle(right + w / 2, cy, max(1, scale), SSD1306_WHITE);
   }
 }
 
@@ -455,30 +459,152 @@ void applyEyeExpression() {
 }
 
 void drawCustomEyes(float dirX, float dirY) {
-  // Movimento volutamente evidente su OLED 128x64.
-  // I valori arrivano già nella coordinata degli occhi.
-  int pupilX = (int)(dirX * 7);
-  int pupilY = (int)(dirY * 5);
-  if (eyeModelIndex == EYE_ROUND) drawEyePair(27, 72, 27, 28, 25, pupilX, pupilY, true, false);
-  else if (eyeModelIndex == EYE_SQUARE) drawEyePair(25, 73, 27, 30, 25, pupilX, pupilY, false, false);
-  else if (eyeModelIndex == EYE_PIXEL) {
-    for (int side = 0; side < 2; side++) { int bx = side == 0 ? 27 : 75; for (int yy = 0; yy < 5; yy++) for (int xx = 0; xx < 5; xx++) if (!(yy == 0 && (xx == 0 || xx == 4))) display.fillRect(bx + xx * 4, 18 + yy * 5, 4, 5, SSD1306_WHITE); display.fillRect(bx + 8 + pupilX, 25 + pupilY, 4, 5, SSD1306_BLACK); }
-  } else if (eyeModelIndex == EYE_CYBER) {
-    int top = 17, bottom = 43;
-    display.drawLine(20, bottom, 30, top, SSD1306_WHITE); display.drawLine(30, top, 55, top + 6, SSD1306_WHITE); display.drawLine(20, bottom, 55, bottom, SSD1306_WHITE);
-    display.drawLine(73, top + 6, 98, top, SSD1306_WHITE); display.drawLine(98, top, 108, bottom, SSD1306_WHITE); display.drawLine(73, bottom, 108, bottom, SSD1306_WHITE);
-    display.fillRect(36 + pupilX, 27 + pupilY, 9, 5, SSD1306_WHITE); display.fillRect(83 + pupilX, 27 + pupilY, 9, 5, SSD1306_WHITE);
-  } else if (eyeModelIndex == EYE_CUTE) {
-    drawEyePair(28, 72, 27, 27, 27, pupilX, pupilY, true, false);
-    display.fillCircle(38 + pupilX, 28 + pupilY, 4, SSD1306_BLACK); display.fillCircle(82 + pupilX, 28 + pupilY, 4, SSD1306_BLACK);
-    display.drawPixel(40 + pupilX, 26 + pupilY, SSD1306_WHITE); display.drawPixel(84 + pupilX, 26 + pupilY, SSD1306_WHITE);
-  } else if (eyeModelIndex == EYE_MINIMAL) {
-    display.fillRoundRect(22, 25, 36, 6, 3, SSD1306_WHITE); display.fillRoundRect(70, 25, 36, 6, 3, SSD1306_WHITE);
-    display.fillRect(36 + pupilX, 25 + pupilY, 8, 6, SSD1306_BLACK); display.fillRect(84 + pupilX, 25 + pupilY, 8, 6, SSD1306_BLACK);
+  const float targetX = dirX * 7.0f;
+  const float targetY = dirY * 5.0f;
+  customEyeX += (targetX - customEyeX) * 0.22f;
+  customEyeY += (targetY - customEyeY) * 0.22f;
+
+  unsigned long now = millis();
+  if (customNextBlink == 0) customNextBlink = now + 3500 + random(0, 2500);
+  if (!customBlinking && now >= customNextBlink) {
+    customBlinking = true;
+    customBlinkUntil = now + 130;
+    customNextBlink = now + 3500 + random(0, 3000);
   }
-  if (eyeExpressionIndex == EXPR_HAPPY) { display.drawLine(25, 45, 42, 40, SSD1306_WHITE); display.drawLine(86, 40, 103, 45, SSD1306_WHITE); }
-  else if (eyeExpressionIndex == EXPR_ANGRY) { display.drawLine(20, 17, 54, 25, SSD1306_WHITE); display.drawLine(74, 25, 108, 17, SSD1306_WHITE); }
-  else if (eyeExpressionIndex == EXPR_TIRED) { display.drawLine(22, 32, 55, 36, SSD1306_WHITE); display.drawLine(73, 36, 106, 32, SSD1306_WHITE); }
+  if (customBlinking && now >= customBlinkUntil) customBlinking = false;
+
+  float blinkScale = customBlinking ? 0.16f : 1.0f;
+  int bx = (int)round(customEyeX);
+  int by = (int)round(customEyeY);
+
+  if (eyeModelIndex == EYE_ROUND) {
+    int cy = 31 + by;
+    int h = max(2, (int)(24 * blinkScale));
+    display.fillRoundRect(28 + bx, cy - h / 2, 24, h, h / 2, SSD1306_WHITE);
+    display.fillRoundRect(76 + bx, cy - h / 2, 24, h, h / 2, SSD1306_WHITE);
+    int p = max(2, h / 4);
+    display.fillCircle(40 + bx, cy, p / 2, SSD1306_BLACK);
+    display.fillCircle(88 + bx, cy, p / 2, SSD1306_BLACK);
+  }
+  else if (eyeModelIndex == EYE_SQUARE) {
+    int h = max(2, (int)(25 * blinkScale));
+    int cy = 31 + by;
+    display.fillRect(25 + bx, cy - h / 2, 30, h, SSD1306_WHITE);
+    display.fillRect(73 + bx, cy - h / 2, 30, h, SSD1306_WHITE);
+    int p = max(2, h / 4);
+    display.fillRect(39 + bx, cy - p / 2, p, p, SSD1306_BLACK);
+    display.fillRect(87 + bx, cy - p / 2, p, p, SSD1306_BLACK);
+  }
+  else if (eyeModelIndex == EYE_PIXEL) {
+    int top = 19 + by;
+    if (!customBlinking) {
+      for (int side = 0; side < 2; side++) {
+        int ox = side == 0 ? 27 + bx : 75 + bx;
+        for (int yy = 0; yy < 5; yy++) for (int xx = 0; xx < 5; xx++) {
+          if (!(yy == 0 && (xx == 0 || xx == 4))) display.fillRect(ox + xx * 4, top + yy * 5, 4, 5, SSD1306_WHITE);
+        }
+        display.fillRect(ox + 8, top + 10, 4, 5, SSD1306_BLACK);
+      }
+    } else {
+      display.fillRect(31 + bx, 31 + by, 18, 3, SSD1306_WHITE);
+      display.fillRect(79 + bx, 31 + by, 18, 3, SSD1306_WHITE);
+    }
+  }
+  else if (eyeModelIndex == EYE_CYBER) {
+    int top = 17 + by, bottom = 43 + by;
+    int ox = bx;
+    if (!customBlinking) {
+      display.drawLine(20 + ox, bottom, 30 + ox, top, SSD1306_WHITE);
+      display.drawLine(30 + ox, top, 55 + ox, top + 6, SSD1306_WHITE);
+      display.drawLine(20 + ox, bottom, 55 + ox, bottom, SSD1306_WHITE);
+      display.drawLine(73 + ox, top + 6, 98 + ox, top, SSD1306_WHITE);
+      display.drawLine(98 + ox, top, 108 + ox, bottom, SSD1306_WHITE);
+      display.drawLine(73 + ox, bottom, 108 + ox, bottom, SSD1306_WHITE);
+      display.fillRect(36 + ox, 27 + by, 9, 5, SSD1306_BLACK);
+      display.fillRect(83 + ox, 27 + by, 9, 5, SSD1306_BLACK);
+    } else {
+      display.drawLine(24 + ox, 31 + by, 52 + ox, 31 + by, SSD1306_WHITE);
+      display.drawLine(76 + ox, 31 + by, 104 + ox, 31 + by, SSD1306_WHITE);
+    }
+  }
+  else if (eyeModelIndex == EYE_CUTE) {
+    int h = max(2, (int)(27 * blinkScale));
+    int cy = 31 + by;
+    display.fillRoundRect(28 + bx, cy - h / 2, 27, h, h / 2, SSD1306_WHITE);
+    display.fillRoundRect(73 + bx, cy - h / 2, 27, h, h / 2, SSD1306_WHITE);
+    if (!customBlinking) {
+      display.fillCircle(41 + bx, cy, 4, SSD1306_BLACK);
+      display.fillCircle(86 + bx, cy, 4, SSD1306_BLACK);
+      display.drawPixel(43 + bx, cy - 2, SSD1306_WHITE);
+      display.drawPixel(88 + bx, cy - 2, SSD1306_WHITE);
+    }
+  }
+  else if (eyeModelIndex == EYE_MINIMAL) {
+    int h = max(2, (int)(6 * blinkScale));
+    int cy = 31 + by;
+    display.fillRoundRect(22 + bx, cy - h / 2, 36, h, h / 2, SSD1306_WHITE);
+    display.fillRoundRect(70 + bx, cy - h / 2, 36, h, h / 2, SSD1306_WHITE);
+    if (!customBlinking) {
+      display.fillRect(36 + bx, cy - h / 2, 8, h, SSD1306_BLACK);
+      display.fillRect(84 + bx, cy - h / 2, 8, h, SSD1306_BLACK);
+    }
+  }
+  else if (eyeModelIndex == EYE_COZMO) {
+    int h = max(2, (int)(27 * blinkScale));
+    int cy = 31 + by;
+    display.fillRoundRect(18 + bx, cy - h / 2, 39, h, 10, SSD1306_WHITE);
+    display.fillRoundRect(71 + bx, cy - h / 2, 39, h, 10, SSD1306_WHITE);
+    if (!customBlinking) {
+      display.fillCircle(38 + bx, cy, 6, SSD1306_BLACK);
+      display.fillCircle(90 + bx, cy, 6, SSD1306_BLACK);
+      display.fillCircle(36 + bx, cy - 2, 2, SSD1306_WHITE);
+      display.fillCircle(88 + bx, cy - 2, 2, SSD1306_WHITE);
+    }
+  }
+  else if (eyeModelIndex == EYE_ANIME) {
+    int h = max(2, (int)(30 * blinkScale));
+    int cy = 31 + by;
+    int top = cy - h / 2;
+    if (!customBlinking) {
+      display.fillRoundRect(18 + bx, top, 40, h, 8, SSD1306_WHITE);
+      display.fillRoundRect(70 + bx, top, 40, h, 8, SSD1306_WHITE);
+      display.fillCircle(38 + bx, cy, 7, SSD1306_BLACK);
+      display.fillCircle(90 + bx, cy, 7, SSD1306_BLACK);
+      display.fillCircle(38 + bx, cy, 3, SSD1306_WHITE);
+      display.fillCircle(90 + bx, cy, 3, SSD1306_WHITE);
+      display.drawLine(17 + bx, top, 28 + bx, top - 5, SSD1306_WHITE);
+      display.drawLine(111 + bx, top, 100 + bx, top - 5, SSD1306_WHITE);
+    } else {
+      display.drawLine(19 + bx, cy, 56 + bx, cy, SSD1306_WHITE);
+      display.drawLine(72 + bx, cy, 109 + bx, cy, SSD1306_WHITE);
+    }
+  }
+  else if (eyeModelIndex == EYE_ORBIT) {
+    int cy = 31 + by;
+    int ry = max(2, (int)(12 * blinkScale));
+    if (!customBlinking) {
+      display.drawCircle(40 + bx, cy, ry, SSD1306_WHITE);
+      display.drawCircle(88 + bx, cy, ry, SSD1306_WHITE);
+      display.fillCircle(40 + bx, cy, 3, SSD1306_WHITE);
+      display.fillCircle(88 + bx, cy, 3, SSD1306_WHITE);
+      display.drawPixel(40 + bx, cy, SSD1306_BLACK);
+      display.drawPixel(88 + bx, cy, SSD1306_BLACK);
+    } else {
+      display.drawLine(28 + bx, cy, 52 + bx, cy, SSD1306_WHITE);
+      display.drawLine(76 + bx, cy, 100 + bx, cy, SSD1306_WHITE);
+    }
+  }
+
+  if (eyeExpressionIndex == EXPR_HAPPY) {
+    display.drawLine(25 + bx, 46 + by, 42 + bx, 41 + by, SSD1306_WHITE);
+    display.drawLine(86 + bx, 41 + by, 103 + bx, 46 + by, SSD1306_WHITE);
+  } else if (eyeExpressionIndex == EXPR_ANGRY) {
+    display.drawLine(20 + bx, 17 + by, 54 + bx, 25 + by, SSD1306_WHITE);
+    display.drawLine(74 + bx, 25 + by, 108 + bx, 17 + by, SSD1306_WHITE);
+  } else if (eyeExpressionIndex == EXPR_TIRED) {
+    display.drawLine(22 + bx, 32 + by, 55 + bx, 36 + by, SSD1306_WHITE);
+    display.drawLine(73 + bx, 36 + by, 106 + bx, 32 + by, SSD1306_WHITE);
+  }
 }
 
 void drawEyePair(int leftX, int rightX, int topY, int w, int h, int pupilX, int pupilY, bool round, bool outline) {
