@@ -23,14 +23,14 @@ Adafruit_MPU6050 mpu;
 RoboEyes<Adafruit_SSD1306> roboEyes(display);
 
 enum Screen {
+    ROBOT,
     MENU,
     GAMES,
-    ROBOT,
     SETTINGS,
     SYSTEM_INFO
 };
 
-Screen currentScreen = MENU;
+Screen currentScreen = ROBOT;
 int menuIndex = 0;
 const int menuItems = 4;
 const char* menuLabels[menuItems] = {
@@ -45,14 +45,20 @@ bool lastDown = HIGH;
 bool lastBack = HIGH;
 bool lastSelect = HIGH;
 
-// Debounce ridotto per rendere i pulsanti piu reattivi.
+// Debounce: 60 ms per una risposta rapida senza falsi input.
 const unsigned long INPUT_DEBOUNCE = 60;
 unsigned long lastInputTime = 0;
+
+// Bianco + Rosso tenuti premuti per entrare nel menu OS.
+const unsigned long MENU_HOLD_TIME = 2500;
+unsigned long bothButtonsStart = 0;
+bool menuHoldTriggered = false;
 
 void drawMenu();
 void drawInfoScreen(const char* title, const char* line1, const char* line2);
 void handleInput();
 void enterSelectedItem();
+void drawRobot();
 
 bool buttonPressed(int pin, bool &lastState) {
     bool state = digitalRead(pin);
@@ -107,44 +113,48 @@ void setup() {
     Serial.println("ROSSO GPIO23  -> GIU");
     Serial.println("BLU GPIO18    -> INDIETRO");
     Serial.println("NERO GPIO5    -> SELEZIONA");
-    Serial.println("OS PRONTO!");
-
-    drawMenu();
+    Serial.println("BIANCO + ROSSO 2.5s -> MENU OS");
+    Serial.println("ROBOT PRONTO!");
 }
 
 void loop() {
+    // Combinazione di sistema sempre attiva per entrare nel menu.
+    bool whiteHeld = digitalRead(BUTTON_UP) == LOW;
+    bool redHeld = digitalRead(BUTTON_DOWN) == LOW;
+
+    if (currentScreen == ROBOT) {
+        if (whiteHeld && redHeld) {
+            if (bothButtonsStart == 0) {
+                bothButtonsStart = millis();
+                menuHoldTriggered = false;
+            }
+
+            if (!menuHoldTriggered && millis() - bothButtonsStart >= MENU_HOLD_TIME) {
+                currentScreen = MENU;
+                menuIndex = 0;
+                menuHoldTriggered = true;
+                bothButtonsStart = 0;
+                Serial.println(">>> MENU OS APERTO");
+                drawMenu();
+            }
+        } else {
+            bothButtonsStart = 0;
+            menuHoldTriggered = false;
+        }
+    }
+
     handleInput();
 
     if (currentScreen == ROBOT) {
-        roboEyes.update();
-
-        sensors_event_t a, g, temp;
-        mpu.getEvent(&a, &g, &temp);
-
-        float x = a.acceleration.x;
-        float y = a.acceleration.y;
-        const float threshold = 2.5;
-
-        bool right = x > threshold;
-        bool left = x < -threshold;
-        bool forward = y < -threshold;
-        bool backward = y > threshold;
-
-        if (right && backward) roboEyes.setPosition(NE);
-        else if (right && forward) roboEyes.setPosition(NW);
-        else if (left && backward) roboEyes.setPosition(SE);
-        else if (left && forward) roboEyes.setPosition(SW);
-        else if (right) roboEyes.setPosition(N);
-        else if (left) roboEyes.setPosition(S);
-        else if (backward) roboEyes.setPosition(E);
-        else if (forward) roboEyes.setPosition(W);
-        else roboEyes.setPosition(DEFAULT);
-
-        delay(20);
+        drawRobot();
     }
 }
 
 void handleInput() {
+    // La combinazione Bianco + Rosso viene gestita separatamente.
+    // Durante la pressione simultanea non usiamo i singoli comandi SU/GIU.
+    if (currentScreen == ROBOT) return;
+
     bool up = buttonPressed(BUTTON_UP, lastUp);
     bool down = buttonPressed(BUTTON_DOWN, lastDown);
     bool back = buttonPressed(BUTTON_BACK, lastBack);
@@ -201,6 +211,34 @@ void enterSelectedItem() {
             Serial.println("> SISTEMA");
             break;
     }
+}
+
+void drawRobot() {
+    roboEyes.update();
+
+    sensors_event_t a, g, temp;
+    mpu.getEvent(&a, &g, &temp);
+
+    float x = a.acceleration.x;
+    float y = a.acceleration.y;
+    const float threshold = 2.5;
+
+    bool right = x > threshold;
+    bool left = x < -threshold;
+    bool forward = y < -threshold;
+    bool backward = y > threshold;
+
+    if (right && backward) roboEyes.setPosition(NE);
+    else if (right && forward) roboEyes.setPosition(NW);
+    else if (left && backward) roboEyes.setPosition(SE);
+    else if (left && forward) roboEyes.setPosition(SW);
+    else if (right) roboEyes.setPosition(N);
+    else if (left) roboEyes.setPosition(S);
+    else if (backward) roboEyes.setPosition(E);
+    else if (forward) roboEyes.setPosition(W);
+    else roboEyes.setPosition(DEFAULT);
+
+    delay(20);
 }
 
 void drawMenu() {
