@@ -45,20 +45,20 @@ bool lastDown = HIGH;
 bool lastBack = HIGH;
 bool lastSelect = HIGH;
 
-// Debounce: 60 ms per una risposta rapida senza falsi input.
 const unsigned long INPUT_DEBOUNCE = 60;
 unsigned long lastInputTime = 0;
 
-// Bianco + Rosso tenuti premuti per entrare nel menu OS.
 const unsigned long MENU_HOLD_TIME = 2500;
 unsigned long bothButtonsStart = 0;
 bool menuHoldTriggered = false;
+unsigned long lastDebugPrint = 0;
 
 void drawMenu();
 void drawInfoScreen(const char* title, const char* line1, const char* line2);
 void handleInput();
 void enterSelectedItem();
 void drawRobot();
+void debugMenuCombo();
 
 bool buttonPressed(int pin, bool &lastState) {
     bool state = digitalRead(pin);
@@ -114,35 +114,12 @@ void setup() {
     Serial.println("BLU GPIO18    -> INDIETRO");
     Serial.println("NERO GPIO5    -> SELEZIONA");
     Serial.println("BIANCO + ROSSO 2.5s -> MENU OS");
+    Serial.println("DEBUG COMBO ATTIVO");
     Serial.println("ROBOT PRONTO!");
 }
 
 void loop() {
-    // Combinazione di sistema sempre attiva per entrare nel menu.
-    bool whiteHeld = digitalRead(BUTTON_UP) == LOW;
-    bool redHeld = digitalRead(BUTTON_DOWN) == LOW;
-
-    if (currentScreen == ROBOT) {
-        if (whiteHeld && redHeld) {
-            if (bothButtonsStart == 0) {
-                bothButtonsStart = millis();
-                menuHoldTriggered = false;
-            }
-
-            if (!menuHoldTriggered && millis() - bothButtonsStart >= MENU_HOLD_TIME) {
-                currentScreen = MENU;
-                menuIndex = 0;
-                menuHoldTriggered = true;
-                bothButtonsStart = 0;
-                Serial.println(">>> MENU OS APERTO");
-                drawMenu();
-            }
-        } else {
-            bothButtonsStart = 0;
-            menuHoldTriggered = false;
-        }
-    }
-
+    debugMenuCombo();
     handleInput();
 
     if (currentScreen == ROBOT) {
@@ -150,9 +127,66 @@ void loop() {
     }
 }
 
+void debugMenuCombo() {
+    bool whiteHeld = digitalRead(BUTTON_UP) == LOW;
+    bool redHeld = digitalRead(BUTTON_DOWN) == LOW;
+
+    // Stampa lo stato dei due ingressi ogni 250 ms.
+    if (millis() - lastDebugPrint >= 250) {
+        lastDebugPrint = millis();
+        Serial.print("DEBUG | Bianco GPIO19: ");
+        Serial.print(whiteHeld ? "PREMUTO" : "rilasciato");
+        Serial.print(" | Rosso GPIO23: ");
+        Serial.print(redHeld ? "PREMUTO" : "rilasciato");
+        Serial.print(" | Screen: ");
+        Serial.println(currentScreen == ROBOT ? "ROBOT" : "MENU/ALTRO");
+    }
+
+    if (currentScreen != ROBOT) {
+        bothButtonsStart = 0;
+        menuHoldTriggered = false;
+        return;
+    }
+
+    if (whiteHeld && redHeld) {
+        if (bothButtonsStart == 0) {
+            bothButtonsStart = millis();
+            menuHoldTriggered = false;
+            Serial.println("DEBUG >>> BIANCO + ROSSO RILEVATI");
+        }
+
+        unsigned long heldTime = millis() - bothButtonsStart;
+
+        // Mostra il tempo di pressione ogni 250 ms.
+        if (heldTime >= 250 && heldTime - (heldTime % 250) != 0) {
+            static unsigned long lastHoldReport = 0;
+            if (heldTime - lastHoldReport >= 250) {
+                lastHoldReport = heldTime;
+                Serial.print("DEBUG >>> COMBO TENUTA: ");
+                Serial.print(heldTime);
+                Serial.println(" ms");
+            }
+        }
+
+        if (!menuHoldTriggered && heldTime >= MENU_HOLD_TIME) {
+            currentScreen = MENU;
+            menuIndex = 0;
+            menuHoldTriggered = true;
+            bothButtonsStart = 0;
+            Serial.println("DEBUG >>> 2500 ms RAGGIUNTI");
+            Serial.println(">>> MENU OS APERTO");
+            drawMenu();
+        }
+    } else {
+        if (bothButtonsStart != 0) {
+            Serial.println("DEBUG >>> COMBO INTERROTTA PRIMA DI 2500 ms");
+        }
+        bothButtonsStart = 0;
+        menuHoldTriggered = false;
+    }
+}
+
 void handleInput() {
-    // La combinazione Bianco + Rosso viene gestita separatamente.
-    // Durante la pressione simultanea non usiamo i singoli comandi SU/GIU.
     if (currentScreen == ROBOT) return;
 
     bool up = buttonPressed(BUTTON_UP, lastUp);
