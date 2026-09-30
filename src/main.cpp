@@ -8,6 +8,7 @@
 #include <Preferences.h>
 #include "SlotMachineGame.h"
 #include "BehaviorEngine.h"
+#include "MiniGames.h"
 
 #define SDA_PIN 21
 #define SCL_PIN 22
@@ -25,6 +26,12 @@ RoboEyes<Adafruit_SSD1306> roboEyes(display);
 Preferences prefs;
 SlotMachineGame slotGame;
 BehaviorEngine behaviorEngine;
+SnakeGame snakeGame;
+DinoGame dinoGame;
+PongGame pongGame;
+MiniGame* activeMiniGame = nullptr;
+Preferences gameRecords;
+unsigned long lastMiniGameRender = 0;
 int activeEyeExpressionIndex = 0;
 unsigned long lastSlotRender = 0;
 
@@ -177,6 +184,7 @@ void setup() {
   pinMode(BUTTON_SELECT, INPUT_PULLUP);
   loadSettings();
   slotGame.begin();
+  gameRecords.begin("gamerecords", false);
   behaviorEngine.begin();
   applyEyeModel();
   applyEyeExpression();
@@ -201,6 +209,26 @@ void loop() {
       if (now - lastSlotRender >= 100) {
           lastSlotRender = now;
           drawSlotGame();
+      }
+  }
+  else if (currentScreen == GAMES_LIST && activeMiniGame != nullptr) {
+      activeMiniGame->update(now);
+      if (activeMiniGame->state() == MiniGameState::EXITED) {
+          const uint8_t keyIndex = gameListIndex;
+          const char* keys[] = {"snake", "dino", "pong"};
+          if (keyIndex < 3 && activeMiniGame->score() > gameRecords.getUInt(keys[keyIndex], 0))
+              gameRecords.putUInt(keys[keyIndex], activeMiniGame->score());
+          activeMiniGame = nullptr;
+          drawGameList();
+      } else if (activeMiniGame->state() == MiniGameState::GAME_OVER) {
+          const uint8_t keyIndex = gameListIndex;
+          const char* keys[] = {"snake", "dino", "pong"};
+          if (keyIndex < 3 && activeMiniGame->score() > gameRecords.getUInt(keys[keyIndex], 0))
+              gameRecords.putUInt(keys[keyIndex], activeMiniGame->score());
+      }
+      if (activeMiniGame != nullptr && now - lastMiniGameRender >= 65) {
+          lastMiniGameRender = now;
+          activeMiniGame->render(display);
       }
   }
 }      
@@ -267,6 +295,10 @@ void handleInput() {
   bool back = buttonPressed(BUTTON_BACK, lastBack);
   bool select = buttonPressed(BUTTON_SELECT, lastSelect);
   if (up || down || back || select) behaviorEngine.interaction();
+  if (activeMiniGame != nullptr) {
+    activeMiniGame->input(up, down, select, back);
+    return;
+  }
 
   if (currentScreen == MENU) {
     if (up) { menuIndex = (menuIndex + menuItems - 1) % menuItems; drawMenu(); }
@@ -295,10 +327,18 @@ void handleInput() {
   if (currentScreen == GAMES_LIST) {
     if (up) { gameListIndex = (gameListIndex + gameListItems - 1) % gameListItems; drawGameList(); }
     if (down) { gameListIndex = (gameListIndex + 1) % gameListItems; drawGameList(); }
-    if (select && gameListIndex == 3) {
-      currentScreen = SLOT_GAME;
-      lastSlotRender = 0;
-      drawSlotGame();
+    if (select) {
+      if (gameListIndex == 3) {
+        currentScreen = SLOT_GAME;
+        lastSlotRender = 0;
+        drawSlotGame();
+      } else {
+        currentScreen = GAMES_LIST;
+        activeMiniGame = gameListIndex == 0 ? static_cast<MiniGame*>(&snakeGame) :
+                         gameListIndex == 1 ? static_cast<MiniGame*>(&dinoGame) : static_cast<MiniGame*>(&pongGame);
+        activeMiniGame->begin(millis());
+        lastMiniGameRender = 0;
+      }
     }
     if (back) { currentScreen = GAMES; drawGames(); }
     return;
@@ -504,9 +544,10 @@ void drawSystemMenu() { drawList("SISTEMA", systemLabels, systemItems, systemInd
 void drawGameRecords() {
   display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1);
   display.setCursor(0, 0); display.println("RECORD"); display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
-  display.setCursor(5, 14); display.println("SNAKE   ---");
-  display.setCursor(5, 25); display.println("DINO    ---");
-  display.setCursor(5, 36); display.println("PONG    ---");
+  uint32_t snakeBest = gameRecords.getUInt("snake", 0), dinoBest = gameRecords.getUInt("dino", 0), pongBest = gameRecords.getUInt("pong", 0);
+  display.setCursor(5, 14); if (snakeBest) display.printf("SNAKE %lu", (unsigned long)snakeBest); else display.println("SNAKE   ---");
+  display.setCursor(5, 25); if (dinoBest) display.printf("DINO %lu", (unsigned long)dinoBest); else display.println("DINO    ---");
+  display.setCursor(5, 36); if (pongBest) display.printf("PONG %lu", (unsigned long)pongBest); else display.println("PONG    ---");
   display.setCursor(5, 47); display.printf("SLOT BEST %lu", static_cast<unsigned long>(slotGame.best()));
   display.display();
 }
