@@ -52,6 +52,7 @@ void BehaviorEngine::update() {
 
 void BehaviorEngine::interaction() {
     lastInteraction = millis();
+    stateUntil = 0;
 
     if (state == RobotState::STATE_SLEEPING ||
         state == RobotState::STATE_CURIOUS ||
@@ -67,9 +68,7 @@ void BehaviorEngine::setState(RobotState newState, unsigned long durationMs) {
         changed = true;
     }
 
-    if (durationMs > 0) {
-        stateUntil = millis() + durationMs;
-    }
+    stateUntil = durationMs > 0 ? millis() + durationMs : 0;
 }
 
 RobotState BehaviorEngine::getState() const {

@@ -6,6 +6,8 @@
 #include <Adafruit_Sensor.h>
 #include <FluxGarage_RoboEyes.h>
 #include <Preferences.h>
+#include "SlotMachineGame.h"
+#include "BehaviorEngine.h"
 
 #define SDA_PIN 21
 #define SCL_PIN 22
@@ -21,12 +23,17 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 Adafruit_MPU6050 mpu;
 RoboEyes<Adafruit_SSD1306> roboEyes(display);
 Preferences prefs;
+SlotMachineGame slotGame;
+BehaviorEngine behaviorEngine;
+int activeEyeExpressionIndex = 0;
+unsigned long lastSlotRender = 0;
 
 enum Screen {
   ROBOT, MENU, GAMES, GAMES_LIST, GAMES_MODE, GAMES_RECORDS, SETTINGS,
   SYSTEM_MENU, SYSTEM_INFO, SYSTEM_RESOURCES, SYSTEM_HARDWARE, SYSTEM_DIAGNOSTICS,
   SYSTEM_REBOOT, EYE_MENU, EYE_MODEL_CAROUSEL, EYE_EXPRESSION,
-  SETTINGS_BEHAVIOR, SETTINGS_DISPLAY, SETTINGS_CONTROLS, SETTINGS_SOUND, SETTINGS_RESET
+  SETTINGS_BEHAVIOR, SETTINGS_DISPLAY, SETTINGS_CONTROLS, SETTINGS_SOUND, SETTINGS_RESET,
+  SLOT_GAME
 };
 Screen currentScreen = ROBOT;
 
@@ -36,8 +43,8 @@ int menuIndex = 0;
 const char* gameLabels[] = {"GIOCA", "MODALITA", "RECORD"};
 const int gameItems = 3;
 int gameIndex = 0;
-const char* gameListLabels[] = {"SNAKE", "DINO", "PONG"};
-const int gameListItems = 3;
+const char* gameListLabels[] = {"SNAKE", "DINO", "PONG", "SLOT"};
+const int gameListItems = 4;
 int gameListIndex = 0;
 const char* gameModeLabels[] = {"UTENTE", "AUTONOMO"};
 const int gameModeItems = 2;
@@ -78,6 +85,12 @@ bool clockEnabled = true;
 int displayBrightness = 255;
 int displayTimeout = 0;
 bool uiSounds = true;
+bool displayAvailable = false;
+bool sensorAvailable = false;
+int sensorX = 0;
+int sensorY = 0;
+unsigned long lastSensorSample = 0;
+unsigned long lastRobotRender = 0;
 bool lastUp = HIGH, lastDown = HIGH, lastBack = HIGH, lastSelect = HIGH;
 const unsigned long INPUT_DEBOUNCE = 60;
 unsigned long lastInputTime = 0;
@@ -93,6 +106,16 @@ bool buttonPressed(int pin, bool &lastState) {
   return false;
 }
 
+int normalizeAxis(float value, int previous) {
+  const float threshold = 2.5f;
+  const float hysteresis = 0.4f;
+  if (previous > 0 && value >= threshold - hysteresis) return 1;
+  if (previous < 0 && value <= -threshold + hysteresis) return -1;
+  if (value >= threshold) return 1;
+  if (value <= -threshold) return -1;
+  return 0;
+}
+
 void handleMenuHold();
 void handleInput();
 void drawRobot();
@@ -101,6 +124,7 @@ void drawGames();
 void drawGameList();
 void drawGameMode();
 void drawGameRecords();
+void drawSlotGame();
 void drawSettings();
 void drawSystemMenu();
 void drawEyeMenu();
@@ -123,6 +147,7 @@ void drawEyePair(int leftX, int rightX, int topY, int w, int h, int pupilX, int 
 void drawEyeModelPreview(int index, int cx, int cy, int scale);
 void applyEyeModel();
 void applyEyeExpression();
+void applyBehaviorLook();
 void saveSettings();
 void loadSettings();
 void resetSettings();
@@ -132,11 +157,16 @@ void setup() {
   delay(500);
   Wire.begin(SDA_PIN, SCL_PIN);
   Wire.setClock(100000);
-  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) while (true) delay(1000);
-  if (!mpu.begin(0x68, &Wire)) while (true) delay(1000);
-  mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
-  mpu.setGyroRange(MPU6050_RANGE_500_DEG);
-  mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+  displayAvailable = display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
+  if (!displayAvailable) Serial.println("OLED non rilevato: interfaccia disabilitata");
+  sensorAvailable = mpu.begin(0x68, &Wire);
+  if (sensorAvailable) {
+    mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+    mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+    mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+  } else {
+    Serial.println("MPU-6050 non rilevato: uso sguardo centrale");
+  }
   roboEyes.begin(SCREEN_WIDTH, SCREEN_HEIGHT, 100);
   roboEyes.setAutoblinker(ON, 3, 2);
   roboEyes.setIdleMode(OFF);
@@ -145,14 +175,30 @@ void setup() {
   pinMode(BUTTON_BACK, INPUT_PULLUP);
   pinMode(BUTTON_SELECT, INPUT_PULLUP);
   loadSettings();
+  slotGame.begin();
+  behaviorEngine.begin();
   applyEyeModel();
   applyEyeExpression();
 }
 
 void loop() {
+  if (!displayAvailable) return;
+  behaviorEngine.update();
+  if (behaviorEngine.stateChanged()) applyBehaviorLook();
   handleMenuHold();
   handleInput();
-  if (currentScreen == ROBOT) drawRobot();
+  if (currentScreen == ROBOT && millis() - lastRobotRender >= 20) {
+    lastRobotRender = millis();
+    drawRobot();
+  }
+  else if (currentScreen == SLOT_GAME) {
+    const unsigned long now = millis();
+    slotGame.update(now);
+    if (now - lastSlotRender >= 80) {
+      lastSlotRender = now;
+      drawSlotGame();
+    }
+  }
 }
 
 void handleMenuHold() {
@@ -163,6 +209,8 @@ void handleMenuHold() {
     if (bothButtonsStart == 0) bothButtonsStart = millis();
     if (!menuHoldTriggered && millis() - bothButtonsStart >= MENU_HOLD_TIME) {
       currentScreen = MENU;
+      behaviorEngine.interaction();
+      behaviorEngine.setState(RobotState::STATE_HAPPY, 900);
       menuIndex = 0;
       menuHoldTriggered = true;
       bothButtonsStart = 0;
@@ -179,13 +227,14 @@ void handleInput() {
   bool down = buttonPressed(BUTTON_DOWN, lastDown);
   bool back = buttonPressed(BUTTON_BACK, lastBack);
   bool select = buttonPressed(BUTTON_SELECT, lastSelect);
+  if (up || down || back || select) behaviorEngine.interaction();
 
   if (currentScreen == MENU) {
     if (up) { menuIndex = (menuIndex + menuItems - 1) % menuItems; drawMenu(); }
     if (down) { menuIndex = (menuIndex + 1) % menuItems; drawMenu(); }
     if (select) {
       if (menuIndex == 0) { currentScreen = GAMES; gameIndex = 0; drawGames(); }
-      else if (menuIndex == 1) { currentScreen = ROBOT; applyEyeModel(); applyEyeExpression(); }
+      else if (menuIndex == 1) { currentScreen = ROBOT; applyEyeModel(); applyBehaviorLook(); }
       else if (menuIndex == 2) { currentScreen = SETTINGS; settingsIndex = 0; drawSettings(); }
       else { currentScreen = SYSTEM_MENU; systemIndex = 0; drawSystemMenu(); }
     }
@@ -207,7 +256,36 @@ void handleInput() {
   if (currentScreen == GAMES_LIST) {
     if (up) { gameListIndex = (gameListIndex + gameListItems - 1) % gameListItems; drawGameList(); }
     if (down) { gameListIndex = (gameListIndex + 1) % gameListItems; drawGameList(); }
+    if (select && gameListIndex == 3) {
+      currentScreen = SLOT_GAME;
+      lastSlotRender = 0;
+      drawSlotGame();
+    }
     if (back) { currentScreen = GAMES; drawGames(); }
+    return;
+  }
+
+  if (currentScreen == SLOT_GAME) {
+    if (slotGame.state() == SlotState::EXIT_CONFIRM) {
+      if (select && slotGame.confirmExit()) { currentScreen = GAMES_LIST; drawGameList(); }
+      else if (back) slotGame.cancelDialog();
+      return;
+    }
+    if (slotGame.state() == SlotState::RELOAD_CONFIRM) {
+      if (select) slotGame.confirmReload();
+      else if (back) slotGame.cancelDialog();
+      return;
+    }
+    if (back) { slotGame.requestExit(); return; }
+    if (slotGame.state() == SlotState::CREDITS_EMPTY && select) {
+      slotGame.requestReload();
+      return;
+    }
+    if (slotGame.state() == SlotState::READY) {
+      if (up) slotGame.selectPreviousBet();
+      if (down) slotGame.selectNextBet();
+      if (select) slotGame.startSpin(millis());
+    }
     return;
   }
 
@@ -331,12 +409,20 @@ void handleInput() {
 }
 
 void drawRobot() {
-  sensors_event_t a, g, temp;
-  mpu.getEvent(&a, &g, &temp);
-  float x = a.acceleration.x, y = a.acceleration.y;
-  const float threshold = 2.5;
-  int sensorX = x > threshold ? 1 : (x < -threshold ? -1 : 0);
-  int sensorY = y > threshold ? 1 : (y < -threshold ? -1 : 0);
+  const unsigned long now = millis();
+  if (sensorAvailable && now - lastSensorSample >= 20) {
+    lastSensorSample = now;
+    sensors_event_t a, g, temp;
+    if (mpu.getEvent(&a, &g, &temp)) {
+      const float x = a.acceleration.x, y = a.acceleration.y;
+      sensorX = normalizeAxis(x, sensorX);
+      sensorY = normalizeAxis(y, sensorY);
+    } else {
+      sensorAvailable = false;
+      sensorX = sensorY = 0;
+      Serial.println("Lettura MPU-6050 fallita: sguardo centrale");
+    }
+  }
 
   if (eyeModelIndex == EYE_CLASSIC) {
     roboEyes.update();
@@ -356,7 +442,6 @@ void drawRobot() {
     drawCustomEyes(eyeX, eyeY);
     display.display();
   }
-  delay(20);
 }
 
 void drawList(const char* title, const char* const* labels, int count, int selected) {
@@ -380,9 +465,68 @@ void drawSystemMenu() { drawList("SISTEMA", systemLabels, systemItems, systemInd
 void drawGameRecords() {
   display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1);
   display.setCursor(0, 0); display.println("RECORD"); display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
-  display.setCursor(5, 22); display.println("SNAKE   ---");
-  display.setCursor(5, 34); display.println("DINO    ---");
-  display.setCursor(5, 46); display.println("PONG    ---"); display.display();
+  display.setCursor(5, 14); display.println("SNAKE   ---");
+  display.setCursor(5, 25); display.println("DINO    ---");
+  display.setCursor(5, 36); display.println("PONG    ---");
+  display.setCursor(5, 47); display.printf("SLOT BEST %lu", static_cast<unsigned long>(slotGame.best()));
+  display.display();
+}
+
+void drawSlotGame() {
+  const SlotState state = slotGame.state();
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print("SLOT");
+  display.setCursor(60, 0);
+  display.printf("COIN %lu", static_cast<unsigned long>(slotGame.coins()));
+  display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+
+  if (state == SlotState::EXIT_CONFIRM) {
+    display.setCursor(9, 21); display.println("USCIRE DALLO SLOT?");
+    display.setCursor(6, 39); display.println("NERO = CONFERMA");
+    display.setCursor(6, 52); display.println("BLU = ANNULLA");
+  } else if (state == SlotState::RELOAD_CONFIRM) {
+    display.setCursor(5, 19); display.println("RICARICA ARCADE");
+    display.setCursor(5, 32); display.println("+100 COIN (1 VOLTA)");
+    display.setCursor(5, 48); display.println("NERO SI  BLU NO");
+  } else if (state == SlotState::CREDITS_EMPTY) {
+    display.setCursor(5, 21); display.println("CREDITI ESAURITI");
+    display.setCursor(5, 39); display.println(slotGame.reloadAvailable() ? "NERO: RICARICA" : "RICARICA GIA USATA");
+    display.setCursor(5, 52); display.println("BLU: ESCI");
+  } else {
+    const int x[3] = {13, 49, 85};
+    for (uint8_t i = 0; i < 3; ++i) {
+      display.drawRoundRect(x[i], 15, 29, 25, 3, SSD1306_WHITE);
+      char glyph = '?';
+      switch (slotGame.reel(i)) {
+        case SlotSymbol::LEMON: glyph = 'L'; break;
+        case SlotSymbol::CHERRY: glyph = 'C'; break;
+        case SlotSymbol::BELL: glyph = 'B'; break;
+        case SlotSymbol::BAR: glyph = 'A'; break;
+        case SlotSymbol::SEVEN: glyph = '7'; break;
+      }
+      display.setTextSize(2);
+      display.setCursor(x[i] + 9, 20);
+      display.write(glyph);
+      display.setTextSize(1);
+    }
+    if (state == SlotState::RESULT) {
+      display.setCursor(2, 43);
+      display.printf("BET %u  PREMIO %u", slotGame.lastBet(), slotGame.payout());
+      display.setCursor(2, 55);
+      display.print(slotGame.lastSpinWon() ? "VINCITA" : "NESSUNA VINCITA");
+    } else if (state == SlotState::SPINNING) {
+      display.setCursor(43, 48); display.print("GIRA...");
+      display.setCursor(5, 57); display.print("ATTENDI IL GIRO");
+    } else {
+      display.setCursor(3, 44); display.printf("BET %u", slotGame.bet());
+      display.setCursor(44, 44); display.print("NERO: SPIN");
+      display.setCursor(3, 56); display.print("BIANCO-/ROSSO+  BLU<");
+    }
+  }
+  display.display();
 }
 
 void drawEyeMenu() {
@@ -451,10 +595,22 @@ void drawEyeExpression() {
 
 void applyEyeModel() { applyEyeExpression(); }
 void applyEyeExpression() {
+  applyBehaviorLook();
+}
+
+void applyBehaviorLook() {
+  const RobotState state = behaviorEngine.getState();
+  activeEyeExpressionIndex = eyeExpressionIndex;
+  if (state == RobotState::STATE_HAPPY) activeEyeExpressionIndex = EXPR_HAPPY;
+  else if (state == RobotState::STATE_CURIOUS) activeEyeExpressionIndex = EXPR_CURIOUS;
+  else if (state == RobotState::STATE_ANGRY) activeEyeExpressionIndex = EXPR_ANGRY;
+  else if (state == RobotState::STATE_TIRED || state == RobotState::STATE_BORED || state == RobotState::STATE_SLEEPING) activeEyeExpressionIndex = EXPR_TIRED;
+
   if (eyeModelIndex != EYE_CLASSIC) return;
-  if (eyeExpressionIndex == EXPR_HAPPY) roboEyes.setMood(HAPPY);
-  else if (eyeExpressionIndex == EXPR_ANGRY) roboEyes.setMood(ANGRY);
-  else if (eyeExpressionIndex == EXPR_TIRED) roboEyes.setMood(TIRED);
+  if (activeEyeExpressionIndex == EXPR_HAPPY) roboEyes.setMood(HAPPY);
+  else if (activeEyeExpressionIndex == EXPR_ANGRY) roboEyes.setMood(ANGRY);
+  else if (activeEyeExpressionIndex == EXPR_TIRED) roboEyes.setMood(TIRED);
+  // RoboEyes has no CURIOUS mood; DEFAULT is the explicit fallback.
   else roboEyes.setMood(DEFAULT);
 }
 
@@ -595,15 +751,19 @@ void drawCustomEyes(float dirX, float dirY) {
     }
   }
 
-  if (eyeExpressionIndex == EXPR_HAPPY) {
+  if (activeEyeExpressionIndex == EXPR_HAPPY) {
     display.drawLine(25 + bx, 46 + by, 42 + bx, 41 + by, SSD1306_WHITE);
     display.drawLine(86 + bx, 41 + by, 103 + bx, 46 + by, SSD1306_WHITE);
-  } else if (eyeExpressionIndex == EXPR_ANGRY) {
+  } else if (activeEyeExpressionIndex == EXPR_ANGRY) {
     display.drawLine(20 + bx, 17 + by, 54 + bx, 25 + by, SSD1306_WHITE);
     display.drawLine(74 + bx, 25 + by, 108 + bx, 17 + by, SSD1306_WHITE);
-  } else if (eyeExpressionIndex == EXPR_TIRED) {
+  } else if (activeEyeExpressionIndex == EXPR_TIRED) {
     display.drawLine(22 + bx, 32 + by, 55 + bx, 36 + by, SSD1306_WHITE);
     display.drawLine(73 + bx, 36 + by, 106 + bx, 32 + by, SSD1306_WHITE);
+  } else if (activeEyeExpressionIndex == EXPR_CURIOUS) {
+    display.drawLine(23 + bx, 24 + by, 43 + bx, 18 + by, SSD1306_WHITE);
+    display.drawLine(85 + bx, 18 + by, 105 + bx, 24 + by, SSD1306_WHITE);
+    display.drawPixel(112 + bx, 16 + by, SSD1306_WHITE);
   }
 }
 
@@ -649,7 +809,7 @@ void drawResources() {
 }
 void drawBar(int x, int y, int w, int h, int percent) { percent = constrain(percent, 0, 100); display.drawRect(x, y, w, h, SSD1306_WHITE); int fill = (w - 2) * percent / 100; if (fill > 0) display.fillRect(x + 1, y + 1, fill, h - 2, SSD1306_WHITE); }
 void drawHardware() {
-  display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1); display.setCursor(0, 0); display.println("HARDWARE"); display.drawLine(0, 9, 127, 9, SSD1306_WHITE); display.setCursor(2, 14); display.println("ESP32 OK"); display.setCursor(2, 25); display.println("OLED 0x3C OK"); display.setCursor(2, 36); display.println("MPU 0x68 OK"); display.setCursor(2, 47); display.println("BTN 19/23/18/5"); display.display();
+  display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1); display.setCursor(0, 0); display.println("HARDWARE"); display.drawLine(0, 9, 127, 9, SSD1306_WHITE); display.setCursor(2, 14); display.println("ESP32 OK"); display.setCursor(2, 25); display.printf("OLED 0x3C %s", displayAvailable ? "OK" : "ERR"); display.setCursor(2, 36); display.printf("MPU 0x68 %s", sensorAvailable ? "OK" : "ERR"); display.setCursor(2, 47); display.println("BTN 19/23/18/5"); display.display();
 }
 void drawDiagnostics() {
   Wire.beginTransmission(OLED_ADDR); bool oledBus = Wire.endTransmission() == 0; Wire.beginTransmission(0x68); bool mpuBus = Wire.endTransmission() == 0;
@@ -660,7 +820,7 @@ void drawReboot() {
 }
 void loadSettings() {
   prefs.begin("desktop", false); eyeModelIndex = prefs.getInt("model", 0); eyeExpressionIndex = prefs.getInt("expr", 0); clockEnabled = prefs.getBool("clock", true); displayBrightness = prefs.getInt("bright", 255); displayTimeout = prefs.getInt("timeout", 0); uiSounds = prefs.getBool("uisound", true);
-  eyeModelIndex = constrain(eyeModelIndex, 0, EYE_MODEL_COUNT - 1); eyeExpressionIndex = constrain(eyeExpressionIndex, 0, EYE_EXPRESSION_COUNT - 1); displayBrightness = constrain(displayBrightness, 32, 255); display.ssd1306_command(SSD1306_SETCONTRAST); display.ssd1306_command(displayBrightness);
+  eyeModelIndex = constrain(eyeModelIndex, 0, EYE_MODEL_COUNT - 1); eyeExpressionIndex = constrain(eyeExpressionIndex, 0, EYE_EXPRESSION_COUNT - 1); displayBrightness = constrain(displayBrightness, 32, 255); if (displayAvailable) { display.ssd1306_command(SSD1306_SETCONTRAST); display.ssd1306_command(displayBrightness); }
 }
 void saveSettings() { prefs.putInt("model", eyeModelIndex); prefs.putInt("expr", eyeExpressionIndex); prefs.putBool("clock", clockEnabled); prefs.putInt("bright", displayBrightness); prefs.putInt("timeout", displayTimeout); prefs.putBool("uisound", uiSounds); }
-void resetSettings() { eyeModelIndex = EYE_CLASSIC; eyeExpressionIndex = EXPR_DEFAULT; clockEnabled = true; displayBrightness = 255; displayTimeout = 0; uiSounds = true; saveSettings(); display.ssd1306_command(SSD1306_SETCONTRAST); display.ssd1306_command(255); applyEyeModel(); applyEyeExpression(); }
+void resetSettings() { eyeModelIndex = EYE_CLASSIC; eyeExpressionIndex = EXPR_DEFAULT; clockEnabled = true; displayBrightness = 255; displayTimeout = 0; uiSounds = true; saveSettings(); if (displayAvailable) { display.ssd1306_command(SSD1306_SETCONTRAST); display.ssd1306_command(255); } applyEyeModel(); applyEyeExpression(); }
