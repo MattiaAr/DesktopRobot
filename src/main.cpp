@@ -236,8 +236,6 @@ void loop() {
         reactionUntil = millis() + 2000;
         wasReacting = true;
     }
-  }
-}
 
     // --------------------------------------------------
     // ROSSO -> TIRED ON/OFF
@@ -383,8 +381,13 @@ void loop() {
     else {
         roboEyes.setPosition(DEFAULT);
     }
-  }
-  else if (eyeModelIndex == EYE_CYBER) {
+  
+  // Posizione e animazione degli occhi
+  int bx = 0;
+  int by = 0;
+  float blinkScale = 1.0f;
+
+  if (eyeModelIndex == EYE_CYBER) {
     int top = 17 + by, bottom = 43 + by;
     int ox = bx;
     if (!customBlinking) {
@@ -483,7 +486,7 @@ void loop() {
     display.drawLine(85 + bx, 18 + by, 105 + bx, 24 + by, SSD1306_WHITE);
     display.drawPixel(112 + bx, 16 + by, SSD1306_WHITE);
   }
-}
+
 
     delay(20);
 }
