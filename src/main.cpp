@@ -507,6 +507,73 @@ void drawGameRecords() {
   display.display();
 }
 
+
+
+void drawSlotSymbol(SlotSymbol symbol, int x, int y) {
+  switch (symbol) {
+    case SlotSymbol::LEMON:
+      // Limone
+      display.drawLine(x + 4, y + 7, x + 8, y + 3, SSD1306_WHITE);
+      display.drawLine(x + 8, y + 3, x + 15, y + 5, SSD1306_WHITE);
+      display.drawLine(x + 15, y + 5, x + 18, y + 10, SSD1306_WHITE);
+      display.drawLine(x + 18, y + 10, x + 13, y + 16, SSD1306_WHITE);
+      display.drawLine(x + 13, y + 16, x + 6, y + 17, SSD1306_WHITE);
+      display.drawLine(x + 6, y + 17, x + 2, y + 12, SSD1306_WHITE);
+      display.drawLine(x + 2, y + 12, x + 4, y + 7, SSD1306_WHITE);
+      // Foglia
+      display.drawLine(x + 9, y + 4, x + 12, y + 1, SSD1306_WHITE);
+      display.drawLine(x + 12, y + 1, x + 15, y + 2, SSD1306_WHITE);
+      break;
+
+    case SlotSymbol::CHERRY:
+      // Gambi e foglia
+      display.drawLine(x + 7, y + 10, x + 9, y + 3, SSD1306_WHITE);
+      display.drawLine(x + 9, y + 3, x + 14, y + 7, SSD1306_WHITE);
+      display.drawLine(x + 9, y + 4, x + 5, y + 2, SSD1306_WHITE);
+      display.drawLine(x + 5, y + 2, x + 7, y + 1, SSD1306_WHITE);
+      // Ciliegie
+      display.fillCircle(x + 6, y + 13, 4, SSD1306_WHITE);
+      display.fillCircle(x + 15, y + 13, 4, SSD1306_WHITE);
+      display.drawPixel(x + 5, y + 12, SSD1306_BLACK);
+      display.drawPixel(x + 14, y + 12, SSD1306_BLACK);
+      break;
+
+    case SlotSymbol::BELL:
+      // Campana
+      display.drawLine(x + 5, y + 12, x + 6, y + 7, SSD1306_WHITE);
+      display.drawLine(x + 6, y + 7, x + 9, y + 4, SSD1306_WHITE);
+      display.drawLine(x + 9, y + 4, x + 12, y + 4, SSD1306_WHITE);
+      display.drawLine(x + 12, y + 4, x + 15, y + 7, SSD1306_WHITE);
+      display.drawLine(x + 15, y + 7, x + 16, y + 12, SSD1306_WHITE);
+      display.drawLine(x + 5, y + 12, x + 16, y + 12, SSD1306_WHITE);
+      display.drawLine(x + 3, y + 15, x + 18, y + 15, SSD1306_WHITE);
+      display.fillCircle(x + 10, y + 18, 2, SSD1306_WHITE);
+      break;
+
+    case SlotSymbol::BAR:
+      // Simbolo BAR
+      display.drawRoundRect(x + 1, y + 4, 18, 12, 2, SSD1306_WHITE);
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.setCursor(x + 3, y + 7);
+      display.print("BAR");
+      break;
+
+    case SlotSymbol::SEVEN:
+      // Simbolo 777
+      display.drawRoundRect(x, y + 4, 20, 12, 2, SSD1306_WHITE);
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.setCursor(x + 2, y + 7);
+      display.print("777");
+      break;
+
+    default:
+      display.drawRect(x + 2, y + 2, 16, 16, SSD1306_WHITE);
+      break;
+  }
+}
+
 void drawSlotGame() {
   const SlotState state = slotGame.state();
   display.clearDisplay();
@@ -532,20 +599,11 @@ void drawSlotGame() {
     display.setCursor(5, 52); display.println("BLU: ESCI");
   } else {
     const int x[3] = {13, 49, 85};
+
     for (uint8_t i = 0; i < 3; ++i) {
       display.drawRoundRect(x[i], 15, 29, 25, 3, SSD1306_WHITE);
-      char glyph = '?';
-      switch (slotGame.reel(i)) {
-        case SlotSymbol::LEMON: glyph = 'L'; break;
-        case SlotSymbol::CHERRY: glyph = 'C'; break;
-        case SlotSymbol::BELL: glyph = 'B'; break;
-        case SlotSymbol::BAR: glyph = 'A'; break;
-        case SlotSymbol::SEVEN: glyph = '7'; break;
-      }
-      display.setTextSize(2);
-      display.setCursor(x[i] + 9, 20);
-      display.write(glyph);
-      display.setTextSize(1);
+
+      drawSlotSymbol(slotGame.reel(i), x[i] + 4, 17);
     }
     if (state == SlotState::RESULT) {
       display.setCursor(2, 43);

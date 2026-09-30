@@ -3,11 +3,11 @@
 // Explicit configuration: each of the five symbols has 20/100 weight on each reel.
 // This transparent baseline is not a calibrated return-to-player model.
 const SlotMachineGame::SymbolWeight SlotMachineGame::symbolWeights[5] = {
-    {SlotSymbol::LEMON, 20},
-    {SlotSymbol::CHERRY, 20},
-    {SlotSymbol::BELL, 20},
-    {SlotSymbol::BAR, 20},
-    {SlotSymbol::SEVEN, 20}
+    {SlotSymbol::LEMON,  36},
+    {SlotSymbol::CHERRY, 27},
+    {SlotSymbol::BELL,   17},
+    {SlotSymbol::BAR,    12},
+    {SlotSymbol::SEVEN,   8}
 };
 
 const uint16_t SlotMachineGame::bets[6] = {5, 10, 20, 40, 80, 160};
