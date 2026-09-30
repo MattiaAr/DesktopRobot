@@ -859,3 +859,4 @@ void loadSettings() {
 }
 void saveSettings() { prefs.putInt("model", eyeModelIndex); prefs.putInt("expr", eyeExpressionIndex); prefs.putBool("clock", clockEnabled); prefs.putInt("bright", displayBrightness); prefs.putInt("timeout", displayTimeout); prefs.putBool("uisound", uiSounds); }
 void resetSettings() { eyeModelIndex = EYE_CLASSIC; eyeExpressionIndex = EXPR_DEFAULT; clockEnabled = true; displayBrightness = 255; displayTimeout = 0; uiSounds = true; saveSettings(); if (displayAvailable) { display.ssd1306_command(SSD1306_SETCONTRAST); display.ssd1306_command(255); } applyEyeModel(); applyEyeExpression(); }
+
