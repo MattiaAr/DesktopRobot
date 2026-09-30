@@ -188,19 +188,23 @@ void loop() {
   if (behaviorEngine.stateChanged()) applyBehaviorLook();
   handleMenuHold();
   handleInput();
-  if (currentScreen == ROBOT && millis() - lastRobotRender >= 20) {
-    lastRobotRender = millis();
-    drawRobot();
+  const unsigned long now = millis();
+  if (currentScreen == ROBOT) {
+      if (now - lastRobotRender >= 100) {
+          lastRobotRender = now;
+          drawRobot();
+      }
   }
   else if (currentScreen == SLOT_GAME) {
-    const unsigned long now = millis();
-    slotGame.update(now);
-    if (now - lastSlotRender >= 80) {
-      lastSlotRender = now;
-      drawSlotGame();
-    }
+      slotGame.update(now);
+
+      if (now - lastSlotRender >= 100) {
+          lastSlotRender = now;
+          drawSlotGame();
+      }
   }
-}
+}      
+
 
 void handleMenuHold() {
   if (currentScreen != ROBOT) { bothButtonsStart = 0; menuHoldTriggered = false; return; }
