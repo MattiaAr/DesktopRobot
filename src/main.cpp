@@ -5,10 +5,9 @@
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 #include <FluxGarage_RoboEyes.h>
-
-// ==================================================
-// PIN
-// ==================================================
+#include <Preferences.h>
+#include "SlotMachineGame.h"
+#include "BehaviorEngine.h"
 
 #define SDA_PIN 21
 #define SCL_PIN 22
@@ -26,13 +25,92 @@
 #define SCREEN_HEIGHT 64
 #define OLED_ADDR 0x3C
 
-// ==================================================
-// OGGETTI
-// ==================================================
-
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 Adafruit_MPU6050 mpu;
 RoboEyes<Adafruit_SSD1306> roboEyes(display);
+Preferences prefs;
+SlotMachineGame slotGame;
+BehaviorEngine behaviorEngine;
+int activeEyeExpressionIndex = 0;
+unsigned long lastSlotRender = 0;
+
+enum Screen {
+  ROBOT, MENU, GAMES, GAMES_LIST, GAMES_MODE, GAMES_RECORDS, SETTINGS,
+  SYSTEM_MENU, SYSTEM_INFO, SYSTEM_RESOURCES, SYSTEM_HARDWARE, SYSTEM_DIAGNOSTICS,
+  SYSTEM_REBOOT, EYE_MENU, EYE_MODEL_CAROUSEL, EYE_EXPRESSION,
+  SETTINGS_BEHAVIOR, SETTINGS_DISPLAY, SETTINGS_CONTROLS, SETTINGS_SOUND, SETTINGS_RESET,
+  SLOT_GAME
+};
+Screen currentScreen = ROBOT;
+
+const char* menuLabels[] = {"GIOCHI", "ROBOT", "IMPOSTAZIONI", "SISTEMA"};
+const int menuItems = 4;
+int menuIndex = 0;
+const char* gameLabels[] = {"GIOCA", "MODALITA", "RECORD"};
+const int gameItems = 3;
+int gameIndex = 0;
+const char* gameListLabels[] = {"SNAKE", "DINO", "PONG", "SLOT"};
+const int gameListItems = 4;
+int gameListIndex = 0;
+const char* gameModeLabels[] = {"UTENTE", "AUTONOMO"};
+const int gameModeItems = 2;
+int gameModeIndex = 0;
+const char* settingsLabels[] = {"OCCHI", "COMPORT.", "DISPLAY", "CONTROLLI", "SUONI", "RESET"};
+const int settingsItems = 6;
+int settingsIndex = 0;
+const char* systemLabels[] = {"INFO ROBOT", "RISORSE", "HARDWARE", "DIAGN.", "RIAVVIA"};
+const int systemItems = 5;
+int systemIndex = 0;
+const char* behaviorLabels[] = {"PERSONAL.", "IDLE", "REAZIONI", "NOIA"};
+const int behaviorItems = 4;
+int behaviorIndex = 0;
+const char* displayLabels[] = {"LUMIN.", "TIMEOUT", "OROLOGIO", "ANIMAZ."};
+const int displayItems = 4;
+int displayIndex = 0;
+const char* controlLabels[] = {"MAPPATURA", "MENU HOLD"};
+int controlIndex = 0;
+const char* soundLabels[] = {"VOLUME", "SUONI UI", "REAZIONI"};
+int soundIndex = 0;
+
+enum EyeModel { EYE_CLASSIC, EYE_ROUND, EYE_SQUARE, EYE_PIXEL, EYE_CYBER, EYE_CUTE, EYE_MINIMAL, EYE_COZMO, EYE_ANIME, EYE_ORBIT };
+const int EYE_MODEL_COUNT = 10;
+const char* eyeModelNames[EYE_MODEL_COUNT] = {"CLASSIC", "ROUND", "SQUARE", "PIXEL", "CYBER", "CUTE", "MINIMAL", "COZMO", "ANIME", "ORBIT"};
+int eyeModelIndex = 0;
+
+enum EyeExpression { EXPR_DEFAULT, EXPR_HAPPY, EXPR_ANGRY, EXPR_TIRED, EXPR_CURIOUS };
+const int EYE_EXPRESSION_COUNT = 5;
+const char* eyeExpressionNames[EYE_EXPRESSION_COUNT] = {"DEFAULT", "HAPPY", "ANGRY", "TIRED", "CURIOUS"};
+int eyeExpressionIndex = 0;
+
+float customEyeX = 0.0f, customEyeY = 0.0f;
+unsigned long customBlinkUntil = 0;
+unsigned long customNextBlink = 0;
+bool customBlinking = false;
+
+bool clockEnabled = true;
+int displayBrightness = 255;
+int displayTimeout = 0;
+bool uiSounds = true;
+bool displayAvailable = false;
+bool sensorAvailable = false;
+int sensorX = 0;
+int sensorY = 0;
+unsigned long lastSensorSample = 0;
+unsigned long lastRobotRender = 0;
+bool lastUp = HIGH, lastDown = HIGH, lastBack = HIGH, lastSelect = HIGH;
+const unsigned long INPUT_DEBOUNCE = 60;
+unsigned long lastInputTime = 0;
+const unsigned long MENU_HOLD_TIME = 2500;
+unsigned long bothButtonsStart = 0;
+bool menuHoldTriggered = false;
+
+bool buttonPressed(int pin, bool &lastState) {
+  bool state = digitalRead(pin);
+  bool pressed = (lastState == HIGH && state == LOW);
+  lastState = state;
+  if (pressed && millis() - lastInputTime >= INPUT_DEBOUNCE) { lastInputTime = millis(); return true; }
+  return false;
+}
 
 // ==================================================
 // STATO PULSANTI
@@ -158,6 +236,8 @@ void loop() {
         reactionUntil = millis() + 2000;
         wasReacting = true;
     }
+  }
+}
 
     // --------------------------------------------------
     // ROSSO -> TIRED ON/OFF
@@ -303,6 +383,107 @@ void loop() {
     else {
         roboEyes.setPosition(DEFAULT);
     }
+  }
+  else if (eyeModelIndex == EYE_CYBER) {
+    int top = 17 + by, bottom = 43 + by;
+    int ox = bx;
+    if (!customBlinking) {
+      display.drawLine(20 + ox, bottom, 30 + ox, top, SSD1306_WHITE);
+      display.drawLine(30 + ox, top, 55 + ox, top + 6, SSD1306_WHITE);
+      display.drawLine(20 + ox, bottom, 55 + ox, bottom, SSD1306_WHITE);
+      display.drawLine(73 + ox, top + 6, 98 + ox, top, SSD1306_WHITE);
+      display.drawLine(98 + ox, top, 108 + ox, bottom, SSD1306_WHITE);
+      display.drawLine(73 + ox, bottom, 108 + ox, bottom, SSD1306_WHITE);
+      display.fillRect(36 + ox, 27 + by, 9, 5, SSD1306_BLACK);
+      display.fillRect(83 + ox, 27 + by, 9, 5, SSD1306_BLACK);
+    } else {
+      display.drawLine(24 + ox, 31 + by, 52 + ox, 31 + by, SSD1306_WHITE);
+      display.drawLine(76 + ox, 31 + by, 104 + ox, 31 + by, SSD1306_WHITE);
+    }
+  }
+  else if (eyeModelIndex == EYE_CUTE) {
+    int h = max(2, (int)(27 * blinkScale));
+    int cy = 31 + by;
+    display.fillRoundRect(28 + bx, cy - h / 2, 27, h, h / 2, SSD1306_WHITE);
+    display.fillRoundRect(73 + bx, cy - h / 2, 27, h, h / 2, SSD1306_WHITE);
+    if (!customBlinking) {
+      display.fillCircle(41 + bx, cy, 4, SSD1306_BLACK);
+      display.fillCircle(86 + bx, cy, 4, SSD1306_BLACK);
+      display.drawPixel(43 + bx, cy - 2, SSD1306_WHITE);
+      display.drawPixel(88 + bx, cy - 2, SSD1306_WHITE);
+    }
+  }
+  else if (eyeModelIndex == EYE_MINIMAL) {
+    int h = max(2, (int)(6 * blinkScale));
+    int cy = 31 + by;
+    display.fillRoundRect(22 + bx, cy - h / 2, 36, h, h / 2, SSD1306_WHITE);
+    display.fillRoundRect(70 + bx, cy - h / 2, 36, h, h / 2, SSD1306_WHITE);
+    if (!customBlinking) {
+      display.fillRect(36 + bx, cy - h / 2, 8, h, SSD1306_BLACK);
+      display.fillRect(84 + bx, cy - h / 2, 8, h, SSD1306_BLACK);
+    }
+  }
+  else if (eyeModelIndex == EYE_COZMO) {
+    int h = max(2, (int)(27 * blinkScale));
+    int cy = 31 + by;
+    display.fillRoundRect(18 + bx, cy - h / 2, 39, h, 10, SSD1306_WHITE);
+    display.fillRoundRect(71 + bx, cy - h / 2, 39, h, 10, SSD1306_WHITE);
+    if (!customBlinking) {
+      display.fillCircle(38 + bx, cy, 6, SSD1306_BLACK);
+      display.fillCircle(90 + bx, cy, 6, SSD1306_BLACK);
+      display.fillCircle(36 + bx, cy - 2, 2, SSD1306_WHITE);
+      display.fillCircle(88 + bx, cy - 2, 2, SSD1306_WHITE);
+    }
+  }
+  else if (eyeModelIndex == EYE_ANIME) {
+    int h = max(2, (int)(30 * blinkScale));
+    int cy = 31 + by;
+    int top = cy - h / 2;
+    if (!customBlinking) {
+      display.fillRoundRect(18 + bx, top, 40, h, 8, SSD1306_WHITE);
+      display.fillRoundRect(70 + bx, top, 40, h, 8, SSD1306_WHITE);
+      display.fillCircle(38 + bx, cy, 7, SSD1306_BLACK);
+      display.fillCircle(90 + bx, cy, 7, SSD1306_BLACK);
+      display.fillCircle(38 + bx, cy, 3, SSD1306_WHITE);
+      display.fillCircle(90 + bx, cy, 3, SSD1306_WHITE);
+      display.drawLine(17 + bx, top, 28 + bx, top - 5, SSD1306_WHITE);
+      display.drawLine(111 + bx, top, 100 + bx, top - 5, SSD1306_WHITE);
+    } else {
+      display.drawLine(19 + bx, cy, 56 + bx, cy, SSD1306_WHITE);
+      display.drawLine(72 + bx, cy, 109 + bx, cy, SSD1306_WHITE);
+    }
+  }
+  else if (eyeModelIndex == EYE_ORBIT) {
+    int cy = 31 + by;
+    int ry = max(2, (int)(12 * blinkScale));
+    if (!customBlinking) {
+      display.drawCircle(40 + bx, cy, ry, SSD1306_WHITE);
+      display.drawCircle(88 + bx, cy, ry, SSD1306_WHITE);
+      display.fillCircle(40 + bx, cy, 3, SSD1306_WHITE);
+      display.fillCircle(88 + bx, cy, 3, SSD1306_WHITE);
+      display.drawPixel(40 + bx, cy, SSD1306_BLACK);
+      display.drawPixel(88 + bx, cy, SSD1306_BLACK);
+    } else {
+      display.drawLine(28 + bx, cy, 52 + bx, cy, SSD1306_WHITE);
+      display.drawLine(76 + bx, cy, 100 + bx, cy, SSD1306_WHITE);
+    }
+  }
+
+  if (activeEyeExpressionIndex == EXPR_HAPPY) {
+    display.drawLine(25 + bx, 46 + by, 42 + bx, 41 + by, SSD1306_WHITE);
+    display.drawLine(86 + bx, 41 + by, 103 + bx, 46 + by, SSD1306_WHITE);
+  } else if (activeEyeExpressionIndex == EXPR_ANGRY) {
+    display.drawLine(20 + bx, 17 + by, 54 + bx, 25 + by, SSD1306_WHITE);
+    display.drawLine(74 + bx, 25 + by, 108 + bx, 17 + by, SSD1306_WHITE);
+  } else if (activeEyeExpressionIndex == EXPR_TIRED) {
+    display.drawLine(22 + bx, 32 + by, 55 + bx, 36 + by, SSD1306_WHITE);
+    display.drawLine(73 + bx, 36 + by, 106 + bx, 32 + by, SSD1306_WHITE);
+  } else if (activeEyeExpressionIndex == EXPR_CURIOUS) {
+    display.drawLine(23 + bx, 24 + by, 43 + bx, 18 + by, SSD1306_WHITE);
+    display.drawLine(85 + bx, 18 + by, 105 + bx, 24 + by, SSD1306_WHITE);
+    display.drawPixel(112 + bx, 16 + by, SSD1306_WHITE);
+  }
+}
 
     delay(20);
 }
