@@ -11,16 +11,10 @@
 
 #define SDA_PIN 21
 #define SCL_PIN 22
-
-#define BUTTON_PIN_1 19  // Bianco
-#define BUTTON_PIN_2 23  // Rosso
-#define BUTTON_PIN_3 18  // Blu
-#define BUTTON_PIN_4 5   // Nero
-
-// ==================================================
-// OLED
-// ==================================================
-
+#define BUTTON_UP 19
+#define BUTTON_DOWN 23
+#define BUTTON_BACK 18
+#define BUTTON_SELECT 5
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_ADDR 0x3C
@@ -103,6 +97,7 @@ unsigned long lastInputTime = 0;
 const unsigned long MENU_HOLD_TIME = 2500;
 unsigned long bothButtonsStart = 0;
 bool menuHoldTriggered = false;
+bool tiredMode = false;
 
 bool buttonPressed(int pin, bool &lastState) {
   bool state = digitalRead(pin);
@@ -112,282 +107,601 @@ bool buttonPressed(int pin, bool &lastState) {
   return false;
 }
 
-// ==================================================
-// STATO PULSANTI
-// ==================================================
+int normalizeAxis(float value, int previous) {
+  const float threshold = 2.5f;
+  const float hysteresis = 0.4f;
+  if (previous > 0 && value >= threshold - hysteresis) return 1;
+  if (previous < 0 && value <= -threshold + hysteresis) return -1;
+  if (value >= threshold) return 1;
+  if (value <= -threshold) return -1;
+  return 0;
+}
 
-bool lastButton1 = HIGH;
-bool lastButton2 = HIGH;
-bool lastButton3 = HIGH;
-bool lastButton4 = HIGH;
-
-// ==================================================
-// STATO ROBOT
-// ==================================================
-
-bool tiredMode = false;
-bool wasReacting = false;
-bool wasShaking = false;
-
-unsigned long reactionUntil = 0;
-unsigned long shakeUntil = 0;
-
-// ==================================================
-// SETUP
-// ==================================================
+void handleMenuHold();
+void handleInput();
+void drawRobot();
+void drawMenu();
+void drawGames();
+void drawGameList();
+void drawGameMode();
+void drawGameRecords();
+void drawSlotGame();
+void drawSettings();
+void drawSystemMenu();
+void drawEyeMenu();
+void drawEyeModelCarousel();
+void drawEyeExpression();
+void drawBehavior();
+void drawDisplaySettings();
+void drawControls();
+void drawSounds();
+void drawReset();
+void drawSystemInfo();
+void drawResources();
+void drawHardware();
+void drawDiagnostics();
+void drawReboot();
+void drawList(const char* title, const char* const* labels, int count, int selected);
+void drawBar(int x, int y, int w, int h, int percent);
+void drawCustomEyes(float dirX, float dirY);
+void drawEyePair(int leftX, int rightX, int topY, int w, int h, int pupilX, int pupilY, bool round, bool outline);
+void drawEyeModelPreview(int index, int cx, int cy, int scale);
+void applyEyeModel();
+void applyEyeExpression();
+void applyBehaviorLook();
+void saveSettings();
+void loadSettings();
+void resetSettings();
 
 void setup() {
-
-    Serial.begin(115200);
-    delay(1000);
-
-    Serial.println();
-    Serial.println("=== DESKTOP ROBOT ===");
-
-    // ------------------------------------------------
-    // I2C
-    // ------------------------------------------------
-
-    Wire.begin(SDA_PIN, SCL_PIN);
-    Wire.setClock(100000);
-
-    // ------------------------------------------------
-    // OLED
-    // ------------------------------------------------
-
-    if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
-        Serial.println("ERRORE OLED!");
-        while (true) {
-            delay(1000);
-        }
-    }
-
-    Serial.println("OLED OK!");
-
-    // ------------------------------------------------
-    // MPU-6050
-    // ------------------------------------------------
-
-    if (!mpu.begin(0x68, &Wire)) {
-        Serial.println("ERRORE MPU!");
-        while (true) {
-            delay(1000);
-        }
-    }
-
-    Serial.println("MPU OK!");
-
+  Serial.begin(115200);
+  delay(500);
+  Wire.begin(SDA_PIN, SCL_PIN);
+  Wire.setClock(100000);
+  displayAvailable = display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
+  if (!displayAvailable) Serial.println("OLED non rilevato: interfaccia disabilitata");
+  sensorAvailable = mpu.begin(0x68, &Wire);
+  if (sensorAvailable) {
     mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
     mpu.setGyroRange(MPU6050_RANGE_500_DEG);
     mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
-
-    // ------------------------------------------------
-    // ROBO EYES
-    // ------------------------------------------------
-
-    roboEyes.begin(SCREEN_WIDTH, SCREEN_HEIGHT, 100);
-    roboEyes.setAutoblinker(ON, 3, 2);
-    roboEyes.setIdleMode(OFF);
-    roboEyes.setMood(DEFAULT);
-    roboEyes.setPosition(DEFAULT);
-
-    // ------------------------------------------------
-    // PULSANTI
-    // ------------------------------------------------
-
-    pinMode(BUTTON_PIN_1, INPUT_PULLUP);
-    pinMode(BUTTON_PIN_2, INPUT_PULLUP);
-    pinMode(BUTTON_PIN_3, INPUT_PULLUP);
-    pinMode(BUTTON_PIN_4, INPUT_PULLUP);
-
-    Serial.println("PULSANTE BIANCO -> GPIO19");
-    Serial.println("PULSANTE ROSSO  -> GPIO23");
-    Serial.println("PULSANTE BLU    -> GPIO18");
-    Serial.println("PULSANTE NERO   -> GPIO5");
-    Serial.println("ROBOT PRONTO!");
+  } else {
+    Serial.println("MPU-6050 non rilevato: uso sguardo centrale");
+  }
+  roboEyes.begin(SCREEN_WIDTH, SCREEN_HEIGHT, 100);
+  roboEyes.setAutoblinker(ON, 3, 2);
+  roboEyes.setIdleMode(OFF);
+  pinMode(BUTTON_UP, INPUT_PULLUP);
+  pinMode(BUTTON_DOWN, INPUT_PULLUP);
+  pinMode(BUTTON_BACK, INPUT_PULLUP);
+  pinMode(BUTTON_SELECT, INPUT_PULLUP);
+  loadSettings();
+  slotGame.begin();
+  behaviorEngine.begin();
+  applyEyeModel();
+  applyEyeExpression();
 }
 
-// ==================================================
-// LOOP
-// ==================================================
-
 void loop() {
+  if (!displayAvailable) return;
+  behaviorEngine.update();
+  if (behaviorEngine.stateChanged()) applyBehaviorLook();
+  handleMenuHold();
+  handleInput();
+  if (currentScreen == ROBOT && millis() - lastRobotRender >= 20) {
+    lastRobotRender = millis();
+    drawRobot();
+  }
+  else if (currentScreen == SLOT_GAME) {
+    const unsigned long now = millis();
+    slotGame.update(now);
+    if (now - lastSlotRender >= 80) {
+      lastSlotRender = now;
+      drawSlotGame();
+    }
+  }
+}
 
-    // RoboEyes deve essere aggiornato continuamente
+void handleMenuHold() {
+  if (currentScreen != ROBOT) { bothButtonsStart = 0; menuHoldTriggered = false; return; }
+  bool whiteHeld = digitalRead(BUTTON_UP) == LOW;
+  bool redHeld = digitalRead(BUTTON_DOWN) == LOW;
+  if (whiteHeld && redHeld) {
+    if (bothButtonsStart == 0) {
+      bothButtonsStart = millis();
+      // Mark the chord buttons as already handled so the menu does not move
+      // as soon as it opens.
+      lastUp = LOW;
+      lastDown = LOW;
+    }
+    if (!menuHoldTriggered && millis() - bothButtonsStart >= MENU_HOLD_TIME) {
+      currentScreen = MENU;
+      behaviorEngine.interaction();
+      behaviorEngine.setState(RobotState::STATE_HAPPY, 900);
+      menuIndex = 0;
+      menuHoldTriggered = true;
+      bothButtonsStart = 0;
+      lastUp = LOW;
+      lastDown = LOW;
+      drawMenu();
+    }
+    return;
+  }
+
+  bothButtonsStart = 0;
+  menuHoldTriggered = false;
+
+  // Keep the robot's single-button reactions while reserving a simultaneous
+  // white+red hold for opening the options menu.
+  if (whiteHeld && lastUp == HIGH) {
+    behaviorEngine.interaction();
+    behaviorEngine.setState(RobotState::STATE_HAPPY, 1800);
+  }
+  if (redHeld && lastDown == HIGH) {
+    tiredMode = !tiredMode;
+    behaviorEngine.interaction();
+    behaviorEngine.setState(tiredMode ? RobotState::STATE_TIRED : RobotState::STATE_NORMAL);
+  }
+  lastUp = whiteHeld ? LOW : HIGH;
+  lastDown = redHeld ? LOW : HIGH;
+
+  if (buttonPressed(BUTTON_BACK, lastBack)) {
+    behaviorEngine.interaction();
+    behaviorEngine.setState(RobotState::STATE_ANGRY, 1000);
+  }
+  if (buttonPressed(BUTTON_SELECT, lastSelect)) {
+    behaviorEngine.interaction();
+    behaviorEngine.setState(RobotState::STATE_NORMAL);
+    tiredMode = false;
+  }
+}
+
+void handleInput() {
+  if (currentScreen == ROBOT) return;
+  bool up = buttonPressed(BUTTON_UP, lastUp);
+  bool down = buttonPressed(BUTTON_DOWN, lastDown);
+  bool back = buttonPressed(BUTTON_BACK, lastBack);
+  bool select = buttonPressed(BUTTON_SELECT, lastSelect);
+  if (up || down || back || select) behaviorEngine.interaction();
+
+  if (currentScreen == MENU) {
+    if (up) { menuIndex = (menuIndex + menuItems - 1) % menuItems; drawMenu(); }
+    if (down) { menuIndex = (menuIndex + 1) % menuItems; drawMenu(); }
+    if (select) {
+      if (menuIndex == 0) { currentScreen = GAMES; gameIndex = 0; drawGames(); }
+      else if (menuIndex == 1) { currentScreen = ROBOT; applyEyeModel(); applyBehaviorLook(); }
+      else if (menuIndex == 2) { currentScreen = SETTINGS; settingsIndex = 0; drawSettings(); }
+      else { currentScreen = SYSTEM_MENU; systemIndex = 0; drawSystemMenu(); }
+    }
+    return;
+  }
+
+  if (currentScreen == GAMES) {
+    if (up) { gameIndex = (gameIndex + gameItems - 1) % gameItems; drawGames(); }
+    if (down) { gameIndex = (gameIndex + 1) % gameItems; drawGames(); }
+    if (select) {
+      if (gameIndex == 0) { currentScreen = GAMES_LIST; gameListIndex = 0; drawGameList(); }
+      else if (gameIndex == 1) { currentScreen = GAMES_MODE; gameModeIndex = 0; drawGameMode(); }
+      else { currentScreen = GAMES_RECORDS; drawGameRecords(); }
+    }
+    if (back) { currentScreen = MENU; drawMenu(); }
+    return;
+  }
+
+  if (currentScreen == GAMES_LIST) {
+    if (up) { gameListIndex = (gameListIndex + gameListItems - 1) % gameListItems; drawGameList(); }
+    if (down) { gameListIndex = (gameListIndex + 1) % gameListItems; drawGameList(); }
+    if (select && gameListIndex == 3) {
+      currentScreen = SLOT_GAME;
+      lastSlotRender = 0;
+      drawSlotGame();
+    }
+    if (back) { currentScreen = GAMES; drawGames(); }
+    return;
+  }
+
+  if (currentScreen == SLOT_GAME) {
+    if (slotGame.state() == SlotState::EXIT_CONFIRM) {
+      if (select && slotGame.confirmExit()) { currentScreen = GAMES_LIST; drawGameList(); }
+      else if (back) slotGame.cancelDialog();
+      return;
+    }
+    if (slotGame.state() == SlotState::RELOAD_CONFIRM) {
+      if (select) slotGame.confirmReload();
+      else if (back) slotGame.cancelDialog();
+      return;
+    }
+    if (back) { slotGame.requestExit(); return; }
+    if (slotGame.state() == SlotState::CREDITS_EMPTY && select) {
+      slotGame.requestReload();
+      return;
+    }
+    if (slotGame.state() == SlotState::READY) {
+      if (up) slotGame.selectPreviousBet();
+      if (down) slotGame.selectNextBet();
+      if (select) slotGame.startSpin(millis());
+    }
+    return;
+  }
+
+  if (currentScreen == GAMES_MODE) {
+    if (up) { gameModeIndex = (gameModeIndex + gameModeItems - 1) % gameModeItems; drawGameMode(); }
+    if (down) { gameModeIndex = (gameModeIndex + 1) % gameModeItems; drawGameMode(); }
+    if (back) { currentScreen = GAMES; drawGames(); }
+    return;
+  }
+
+  if (currentScreen == GAMES_RECORDS) {
+    if (back) { currentScreen = GAMES; drawGames(); }
+    return;
+  }
+
+  if (currentScreen == SETTINGS) {
+    if (up) { settingsIndex = (settingsIndex + settingsItems - 1) % settingsItems; drawSettings(); }
+    if (down) { settingsIndex = (settingsIndex + 1) % settingsItems; drawSettings(); }
+    if (select) {
+      if (settingsIndex == 0) { currentScreen = EYE_MENU; drawEyeMenu(); }
+      else if (settingsIndex == 1) { currentScreen = SETTINGS_BEHAVIOR; behaviorIndex = 0; drawBehavior(); }
+      else if (settingsIndex == 2) { currentScreen = SETTINGS_DISPLAY; displayIndex = 0; drawDisplaySettings(); }
+      else if (settingsIndex == 3) { currentScreen = SETTINGS_CONTROLS; controlIndex = 0; drawControls(); }
+      else if (settingsIndex == 4) { currentScreen = SETTINGS_SOUND; soundIndex = 0; drawSounds(); }
+      else { currentScreen = SETTINGS_RESET; drawReset(); }
+    }
+    if (back) { currentScreen = MENU; drawMenu(); }
+    return;
+  }
+
+  if (currentScreen == EYE_MENU) {
+    if (up || down || select) { currentScreen = EYE_MODEL_CAROUSEL; drawEyeModelCarousel(); }
+    if (back) { currentScreen = SETTINGS; drawSettings(); }
+    return;
+  }
+
+  if (currentScreen == EYE_MODEL_CAROUSEL) {
+    if (up) { eyeModelIndex = (eyeModelIndex + EYE_MODEL_COUNT - 1) % EYE_MODEL_COUNT; applyEyeModel(); drawEyeModelCarousel(); }
+    if (down) { eyeModelIndex = (eyeModelIndex + 1) % EYE_MODEL_COUNT; applyEyeModel(); drawEyeModelCarousel(); }
+    if (select) { saveSettings(); currentScreen = EYE_EXPRESSION; drawEyeExpression(); }
+    if (back) { currentScreen = EYE_MENU; drawEyeMenu(); }
+    return;
+  }
+
+  if (currentScreen == EYE_EXPRESSION) {
+    if (up) { eyeExpressionIndex = (eyeExpressionIndex + EYE_EXPRESSION_COUNT - 1) % EYE_EXPRESSION_COUNT; applyEyeExpression(); drawEyeExpression(); }
+    if (down) { eyeExpressionIndex = (eyeExpressionIndex + 1) % EYE_EXPRESSION_COUNT; applyEyeExpression(); drawEyeExpression(); }
+    if (select) { saveSettings(); currentScreen = EYE_MENU; drawEyeMenu(); }
+    if (back) { currentScreen = EYE_MENU; drawEyeMenu(); }
+    return;
+  }
+
+  if (currentScreen == SYSTEM_MENU) {
+    if (up) { systemIndex = (systemIndex + systemItems - 1) % systemItems; drawSystemMenu(); }
+    if (down) { systemIndex = (systemIndex + 1) % systemItems; drawSystemMenu(); }
+    if (select) {
+      if (systemIndex == 0) { currentScreen = SYSTEM_INFO; drawSystemInfo(); }
+      else if (systemIndex == 1) { currentScreen = SYSTEM_RESOURCES; drawResources(); }
+      else if (systemIndex == 2) { currentScreen = SYSTEM_HARDWARE; drawHardware(); }
+      else if (systemIndex == 3) { currentScreen = SYSTEM_DIAGNOSTICS; drawDiagnostics(); }
+      else { currentScreen = SYSTEM_REBOOT; drawReboot(); }
+    }
+    if (back) { currentScreen = MENU; drawMenu(); }
+    return;
+  }
+
+  if (currentScreen == SETTINGS_BEHAVIOR) {
+    if (up) { behaviorIndex = (behaviorIndex + behaviorItems - 1) % behaviorItems; drawBehavior(); }
+    if (down) { behaviorIndex = (behaviorIndex + 1) % behaviorItems; drawBehavior(); }
+    if (back) { currentScreen = SETTINGS; drawSettings(); }
+    return;
+  }
+
+  if (currentScreen == SETTINGS_DISPLAY) {
+    if (up) { displayIndex = (displayIndex + displayItems - 1) % displayItems; drawDisplaySettings(); }
+    if (down) { displayIndex = (displayIndex + 1) % displayItems; drawDisplaySettings(); }
+    if (select) {
+      if (displayIndex == 0) { displayBrightness += 32; if (displayBrightness > 255) displayBrightness = 32; display.ssd1306_command(SSD1306_SETCONTRAST); display.ssd1306_command(displayBrightness); }
+      else if (displayIndex == 2) clockEnabled = !clockEnabled;
+      saveSettings(); drawDisplaySettings();
+    }
+    if (back) { currentScreen = SETTINGS; drawSettings(); }
+    return;
+  }
+
+  if (currentScreen == SETTINGS_CONTROLS) {
+    if (up || down) { controlIndex = 1 - controlIndex; drawControls(); }
+    if (back) { currentScreen = SETTINGS; drawSettings(); }
+    return;
+  }
+
+  if (currentScreen == SETTINGS_SOUND) {
+    if (up) { soundIndex = (soundIndex + 2) % 3; drawSounds(); }
+    if (down) { soundIndex = (soundIndex + 1) % 3; drawSounds(); }
+    if (select && soundIndex == 1) { uiSounds = !uiSounds; saveSettings(); drawSounds(); }
+    if (back) { currentScreen = SETTINGS; drawSettings(); }
+    return;
+  }
+
+  if (currentScreen == SETTINGS_RESET) {
+    if (select) { resetSettings(); currentScreen = SETTINGS; drawSettings(); }
+    if (back) { currentScreen = SETTINGS; drawSettings(); }
+    return;
+  }
+
+  if (currentScreen == SYSTEM_REBOOT) {
+    if (select) ESP.restart();
+    if (back) { currentScreen = SYSTEM_MENU; drawSystemMenu(); }
+    return;
+  }
+
+  if (currentScreen == SYSTEM_DIAGNOSTICS) {
+    if (select) drawDiagnostics();
+    if (back) { currentScreen = SYSTEM_MENU; drawSystemMenu(); }
+    return;
+  }
+
+  if (currentScreen == SYSTEM_INFO || currentScreen == SYSTEM_RESOURCES || currentScreen == SYSTEM_HARDWARE) {
+    if (back) { currentScreen = SYSTEM_MENU; drawSystemMenu(); }
+  }
+}
+
+void drawRobot() {
+  const unsigned long now = millis();
+  if (sensorAvailable && now - lastSensorSample >= 20) {
+    lastSensorSample = now;
+    sensors_event_t a, g, temp;
+    if (mpu.getEvent(&a, &g, &temp)) {
+      const float x = a.acceleration.x, y = a.acceleration.y;
+      sensorX = normalizeAxis(x, sensorX);
+      sensorY = normalizeAxis(y, sensorY);
+    } else {
+      sensorAvailable = false;
+      sensorX = sensorY = 0;
+      Serial.println("Lettura MPU-6050 fallita: sguardo centrale");
+    }
+  }
+
+  if (eyeModelIndex == EYE_CLASSIC) {
     roboEyes.update();
+    if (sensorX > 0 && sensorY > 0) roboEyes.setPosition(NE);
+    else if (sensorX > 0 && sensorY < 0) roboEyes.setPosition(NW);
+    else if (sensorX < 0 && sensorY > 0) roboEyes.setPosition(SE);
+    else if (sensorX < 0 && sensorY < 0) roboEyes.setPosition(SW);
+    else if (sensorX > 0) roboEyes.setPosition(N);
+    else if (sensorX < 0) roboEyes.setPosition(S);
+    else if (sensorY > 0) roboEyes.setPosition(E);
+    else if (sensorY < 0) roboEyes.setPosition(W);
+    else roboEyes.setPosition(DEFAULT);
+  } else {
+    int eyeX = sensorY;
+    int eyeY = -sensorX;
+    display.clearDisplay();
+    drawCustomEyes(eyeX, eyeY);
+    display.display();
+  }
+}
 
-    // ==================================================
-    // LETTURA PULSANTI
-    // ==================================================
+void drawList(const char* title, const char* const* labels, int count, int selected) {
+  display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1);
+  display.setCursor(0, 0); display.println(title); display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  int first = max(0, min(selected - 1, count - 4));
+  for (int i = 0; i < 4 && first + i < count; i++) {
+    int idx = first + i, y = 14 + i * 12;
+    display.setCursor(2, y); display.print(idx == selected ? ">" : " ");
+    display.setCursor(12, y); display.println(labels[idx]);
+  }
+  display.display();
+}
+void drawMenu() { drawList("DESKTOP OS", menuLabels, menuItems, menuIndex); }
+void drawGames() { drawList("GIOCHI", gameLabels, gameItems, gameIndex); }
+void drawGameList() { drawList("SCEGLI GIOCO", gameListLabels, gameListItems, gameListIndex); }
+void drawGameMode() { drawList("MODALITA", gameModeLabels, gameModeItems, gameModeIndex); }
+void drawSettings() { drawList("IMPOSTAZIONI", settingsLabels, settingsItems, settingsIndex); }
+void drawSystemMenu() { drawList("SISTEMA", systemLabels, systemItems, systemIndex); }
 
-    bool button1 = digitalRead(BUTTON_PIN_1);
-    bool button2 = digitalRead(BUTTON_PIN_2);
-    bool button3 = digitalRead(BUTTON_PIN_3);
-    bool button4 = digitalRead(BUTTON_PIN_4);
+void drawGameRecords() {
+  display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1);
+  display.setCursor(0, 0); display.println("RECORD"); display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  display.setCursor(5, 14); display.println("SNAKE   ---");
+  display.setCursor(5, 25); display.println("DINO    ---");
+  display.setCursor(5, 36); display.println("PONG    ---");
+  display.setCursor(5, 47); display.printf("SLOT BEST %lu", static_cast<unsigned long>(slotGame.best()));
+  display.display();
+}
 
-    // --------------------------------------------------
-    // BIANCO -> HAPPY
-    // --------------------------------------------------
+void drawSlotGame() {
+  const SlotState state = slotGame.state();
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print("SLOT");
+  display.setCursor(60, 0);
+  display.printf("COIN %lu", static_cast<unsigned long>(slotGame.coins()));
+  display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
 
-    if (lastButton1 == HIGH && button1 == LOW) {
-        Serial.println(">>> BIANCO GPIO19 -> PREMUTO");
-        roboEyes.setMood(HAPPY);
-        roboEyes.anim_laugh();
-        reactionUntil = millis() + 2000;
-        wasReacting = true;
+  if (state == SlotState::EXIT_CONFIRM) {
+    display.setCursor(9, 21); display.println("USCIRE DALLO SLOT?");
+    display.setCursor(6, 39); display.println("NERO = CONFERMA");
+    display.setCursor(6, 52); display.println("BLU = ANNULLA");
+  } else if (state == SlotState::RELOAD_CONFIRM) {
+    display.setCursor(5, 19); display.println("RICARICA ARCADE");
+    display.setCursor(5, 32); display.println("+100 COIN (1 VOLTA)");
+    display.setCursor(5, 48); display.println("NERO SI  BLU NO");
+  } else if (state == SlotState::CREDITS_EMPTY) {
+    display.setCursor(5, 21); display.println("CREDITI ESAURITI");
+    display.setCursor(5, 39); display.println(slotGame.reloadAvailable() ? "NERO: RICARICA" : "RICARICA GIA USATA");
+    display.setCursor(5, 52); display.println("BLU: ESCI");
+  } else {
+    const int x[3] = {13, 49, 85};
+    for (uint8_t i = 0; i < 3; ++i) {
+      display.drawRoundRect(x[i], 15, 29, 25, 3, SSD1306_WHITE);
+      char glyph = '?';
+      switch (slotGame.reel(i)) {
+        case SlotSymbol::LEMON: glyph = 'L'; break;
+        case SlotSymbol::CHERRY: glyph = 'C'; break;
+        case SlotSymbol::BELL: glyph = 'B'; break;
+        case SlotSymbol::BAR: glyph = 'A'; break;
+        case SlotSymbol::SEVEN: glyph = '7'; break;
+      }
+      display.setTextSize(2);
+      display.setCursor(x[i] + 9, 20);
+      display.write(glyph);
+      display.setTextSize(1);
     }
+    if (state == SlotState::RESULT) {
+      display.setCursor(2, 43);
+      display.printf("BET %u  PREMIO %u", slotGame.lastBet(), slotGame.payout());
+      display.setCursor(2, 55);
+      display.print(slotGame.lastSpinWon() ? "VINCITA" : "NESSUNA VINCITA");
+    } else if (state == SlotState::SPINNING) {
+      display.setCursor(43, 48); display.print("GIRA...");
+      display.setCursor(5, 57); display.print("ATTENDI IL GIRO");
+    } else {
+      display.setCursor(3, 44); display.printf("BET %u", slotGame.bet());
+      display.setCursor(44, 44); display.print("NERO: SPIN");
+      display.setCursor(3, 56); display.print("BIANCO-/ROSSO+  BLU<");
+    }
+  }
+  display.display();
+}
 
-    // --------------------------------------------------
-    // ROSSO -> TIRED ON/OFF
-    // --------------------------------------------------
+void drawEyeMenu() {
+  display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1);
+  display.setCursor(0, 0); display.println("OCCHI"); display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  display.setCursor(4, 18); display.println("MODELLO"); display.setCursor(82, 18); display.println(eyeModelNames[eyeModelIndex]);
+  display.setCursor(4, 31); display.println("ESPRESS."); display.setCursor(82, 31); display.println(eyeExpressionNames[eyeExpressionIndex]);
+  drawEyePair(43, 68, 42, 16, 10, 0, 0, true, false);
+  display.setCursor(3, 56); display.print("N = MODELLO"); display.setCursor(82, 56); display.print("OK"); display.display();
+}
 
-    if (lastButton2 == HIGH && button2 == LOW) {
-        tiredMode = !tiredMode;
+void drawEyeModelPreview(int index, int cx, int cy, int scale) {
+  int w = 18 * scale, h = 11 * scale, gap = 7 * scale;
+  int left = cx - gap - w, right = cx + gap, top = cy - h / 2;
+  if (index == EYE_CLASSIC) {
+    display.fillRoundRect(left, top, w, h, 4 * scale, SSD1306_WHITE); display.fillRoundRect(right, top, w, h, 4 * scale, SSD1306_WHITE);
+  } else if (index == EYE_ROUND) {
+    display.fillCircle(left + w / 2, cy, h / 2 + 1, SSD1306_WHITE); display.fillCircle(right + w / 2, cy, h / 2 + 1, SSD1306_WHITE);
+  } else if (index == EYE_SQUARE) {
+    display.fillRect(left, top, w, h, SSD1306_WHITE); display.fillRect(right, top, w, h, SSD1306_WHITE);
+  } else if (index == EYE_PIXEL) {
+    int s = max(1, scale * 2);
+    for (int py = 0; py < 5; py++) for (int px = 0; px < 4; px++) if (!((px == 0 || px == 3) && py == 0)) { display.fillRect(left + px * s, top + py * s, s, s, SSD1306_WHITE); display.fillRect(right + px * s, top + py * s, s, s, SSD1306_WHITE); }
+  } else if (index == EYE_CYBER) {
+    display.drawLine(left, top + h, left + w / 3, top, SSD1306_WHITE); display.drawLine(left + w / 3, top, left + w, top + h / 3, SSD1306_WHITE); display.drawLine(left, top + h, left + w, top + h, SSD1306_WHITE);
+    display.drawLine(right, top + h / 3, right + 2 * w / 3, top, SSD1306_WHITE); display.drawLine(right + 2 * w / 3, top, right + w, top + h, SSD1306_WHITE); display.drawLine(right, top + h, right + w, top + h, SSD1306_WHITE);
+  } else if (index == EYE_CUTE) {
+    display.fillRoundRect(left, top, w, h, h / 2, SSD1306_WHITE); display.fillRoundRect(right, top, w, h, h / 2, SSD1306_WHITE);
+    display.fillCircle(left + w / 2, cy - 1, max(1, scale), SSD1306_BLACK); display.fillCircle(right + w / 2, cy - 1, max(1, scale), SSD1306_BLACK);
+  } else if (index == EYE_MINIMAL) {
+    display.fillRoundRect(left, cy - 2 * scale, w, 4 * scale, 2 * scale, SSD1306_WHITE); display.fillRoundRect(right, cy - 2 * scale, w, 4 * scale, 2 * scale, SSD1306_WHITE);
+  } else if (index == EYE_COZMO) {
+    display.fillRoundRect(left - 2 * scale, top, w + 4 * scale, h + 2 * scale, 5 * scale, SSD1306_WHITE);
+    display.fillRoundRect(right - 2 * scale, top, w + 4 * scale, h + 2 * scale, 5 * scale, SSD1306_WHITE);
+    display.fillCircle(left + w / 2, cy, max(1, scale), SSD1306_BLACK); display.fillCircle(right + w / 2, cy, max(1, scale), SSD1306_BLACK);
+  } else if (index == EYE_ANIME) {
+    display.fillRoundRect(left - 2 * scale, top - 2 * scale, w + 4 * scale, h + 4 * scale, 4 * scale, SSD1306_WHITE);
+    display.fillRoundRect(right - 2 * scale, top - 2 * scale, w + 4 * scale, h + 4 * scale, 4 * scale, SSD1306_WHITE);
+    display.fillCircle(left + w / 2, cy, max(2, 2 * scale), SSD1306_BLACK); display.fillCircle(right + w / 2, cy, max(2, 2 * scale), SSD1306_BLACK);
+  } else {
+    display.drawCircle(left + w / 2, cy, max(3, h / 2), SSD1306_WHITE); display.drawCircle(right + w / 2, cy, max(3, h / 2), SSD1306_WHITE);
+    display.fillCircle(left + w / 2, cy, max(1, scale), SSD1306_WHITE); display.fillCircle(right + w / 2, cy, max(1, scale), SSD1306_WHITE);
+  }
+}
 
-        if (tiredMode) {
-            Serial.println(">>> ROSSO GPIO23 -> PREMUTO / TIRED ON");
-            roboEyes.setMood(TIRED);
-        } else {
-            Serial.println(">>> ROSSO GPIO23 -> PREMUTO / TIRED OFF");
-            roboEyes.setMood(DEFAULT);
+void drawEyeModelCarousel() {
+  display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1);
+  display.setCursor(0, 0); display.println("OCCHI / MODELLO"); display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  int prev = (eyeModelIndex + EYE_MODEL_COUNT - 1) % EYE_MODEL_COUNT, next = (eyeModelIndex + 1) % EYE_MODEL_COUNT;
+  display.setCursor(2, 20); display.print("<"); display.setCursor(114, 20); display.print(">");
+  display.setCursor(42, 20); display.print(eyeModelNames[eyeModelIndex]);
+  drawEyeModelPreview(prev, 18, 39, 1); drawEyeModelPreview(eyeModelIndex, 64, 39, 2); drawEyeModelPreview(next, 110, 39, 1);
+  display.setCursor(2, 56); display.print("B/R cambia"); display.setCursor(72, 56); display.print("N OK BL ind"); display.display();
+}
+
+void drawEyeExpression() {
+  display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1);
+  display.setCursor(0, 0); display.println("OCCHI / ESPRESS."); display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  int prev = (eyeExpressionIndex + EYE_EXPRESSION_COUNT - 1) % EYE_EXPRESSION_COUNT, next = (eyeExpressionIndex + 1) % EYE_EXPRESSION_COUNT;
+  display.setCursor(3, 20); display.print("< "); display.print(eyeExpressionNames[prev]);
+  display.setCursor(47, 20); display.print(eyeExpressionNames[eyeExpressionIndex]);
+  display.setCursor(93, 20); display.print(eyeExpressionNames[next]); display.print(" >");
+  drawEyeModelPreview(eyeModelIndex, 64, 39, 2);
+  display.setCursor(4, 56); display.print("B/R cambia"); display.setCursor(76, 56); display.print("N OK"); display.display();
+}
+
+void applyEyeModel() { applyEyeExpression(); }
+void applyEyeExpression() {
+  applyBehaviorLook();
+}
+
+void applyBehaviorLook() {
+  const RobotState state = behaviorEngine.getState();
+  activeEyeExpressionIndex = eyeExpressionIndex;
+  if (state == RobotState::STATE_HAPPY) activeEyeExpressionIndex = EXPR_HAPPY;
+  else if (state == RobotState::STATE_CURIOUS) activeEyeExpressionIndex = EXPR_CURIOUS;
+  else if (state == RobotState::STATE_ANGRY) activeEyeExpressionIndex = EXPR_ANGRY;
+  else if (state == RobotState::STATE_TIRED || state == RobotState::STATE_BORED || state == RobotState::STATE_SLEEPING) activeEyeExpressionIndex = EXPR_TIRED;
+
+  if (eyeModelIndex != EYE_CLASSIC) return;
+  if (activeEyeExpressionIndex == EXPR_HAPPY) roboEyes.setMood(HAPPY);
+  else if (activeEyeExpressionIndex == EXPR_ANGRY) roboEyes.setMood(ANGRY);
+  else if (activeEyeExpressionIndex == EXPR_TIRED) roboEyes.setMood(TIRED);
+  // RoboEyes has no CURIOUS mood; DEFAULT is the explicit fallback.
+  else roboEyes.setMood(DEFAULT);
+}
+
+void drawCustomEyes(float dirX, float dirY) {
+  const float targetX = dirX * 7.0f;
+  const float targetY = dirY * 5.0f;
+  customEyeX += (targetX - customEyeX) * 0.22f;
+  customEyeY += (targetY - customEyeY) * 0.22f;
+
+  unsigned long now = millis();
+  if (customNextBlink == 0) customNextBlink = now + 3500 + random(0, 2500);
+  if (!customBlinking && now >= customNextBlink) {
+    customBlinking = true;
+    customBlinkUntil = now + 130;
+    customNextBlink = now + 3500 + random(0, 3000);
+  }
+  if (customBlinking && now >= customBlinkUntil) customBlinking = false;
+
+  float blinkScale = customBlinking ? 0.16f : 1.0f;
+  int bx = (int)round(customEyeX);
+  int by = (int)round(customEyeY);
+
+  if (eyeModelIndex == EYE_ROUND) {
+    int cy = 31 + by;
+    int h = max(2, (int)(24 * blinkScale));
+    display.fillRoundRect(28 + bx, cy - h / 2, 24, h, h / 2, SSD1306_WHITE);
+    display.fillRoundRect(76 + bx, cy - h / 2, 24, h, h / 2, SSD1306_WHITE);
+    int p = max(2, h / 4);
+    display.fillCircle(40 + bx, cy, p / 2, SSD1306_BLACK);
+    display.fillCircle(88 + bx, cy, p / 2, SSD1306_BLACK);
+  }
+  else if (eyeModelIndex == EYE_SQUARE) {
+    int h = max(2, (int)(25 * blinkScale));
+    int cy = 31 + by;
+    display.fillRect(25 + bx, cy - h / 2, 30, h, SSD1306_WHITE);
+    display.fillRect(73 + bx, cy - h / 2, 30, h, SSD1306_WHITE);
+    int p = max(2, h / 4);
+    display.fillRect(39 + bx, cy - p / 2, p, p, SSD1306_BLACK);
+    display.fillRect(87 + bx, cy - p / 2, p, p, SSD1306_BLACK);
+  }
+  else if (eyeModelIndex == EYE_PIXEL) {
+    int top = 19 + by;
+    if (!customBlinking) {
+      for (int side = 0; side < 2; side++) {
+        int ox = side == 0 ? 27 + bx : 75 + bx;
+        for (int yy = 0; yy < 5; yy++) for (int xx = 0; xx < 5; xx++) {
+          if (!(yy == 0 && (xx == 0 || xx == 4))) display.fillRect(ox + xx * 4, top + yy * 5, 4, 5, SSD1306_WHITE);
         }
+        display.fillRect(ox + 8, top + 10, 4, 5, SSD1306_BLACK);
+      }
+    } else {
+      display.fillRect(31 + bx, 31 + by, 18, 3, SSD1306_WHITE);
+      display.fillRect(79 + bx, 31 + by, 18, 3, SSD1306_WHITE);
     }
-
-    // --------------------------------------------------
-    // BLU -> ANGRY
-    // --------------------------------------------------
-
-    if (lastButton3 == HIGH && button3 == LOW) {
-        Serial.println(">>> BLU GPIO18 -> PREMUTO");
-        roboEyes.setMood(ANGRY);
-        reactionUntil = millis() + 1000;
-        wasReacting = true;
-    }
-
-    // --------------------------------------------------
-    // NERO -> DEFAULT
-    // --------------------------------------------------
-
-    if (lastButton4 == HIGH && button4 == LOW) {
-        Serial.println(">>> NERO GPIO5 -> PREMUTO");
-        roboEyes.setMood(DEFAULT);
-        reactionUntil = millis() + 1000;
-        wasReacting = true;
-    }
-
-    lastButton1 = button1;
-    lastButton2 = button2;
-    lastButton3 = button3;
-    lastButton4 = button4;
-
-    // --------------------------------------------------
-    // Fine reazione
-    // --------------------------------------------------
-
-    if (wasReacting && millis() >= reactionUntil) {
-        if (tiredMode) {
-            roboEyes.setMood(TIRED);
-        } else {
-            roboEyes.setMood(DEFAULT);
-        }
-
-        wasReacting = false;
-        Serial.println(">>> REAZIONE FINITA");
-    }
-
-    // ==================================================
-    // LETTURA MPU
-    // ==================================================
-
-    sensors_event_t a;
-    sensors_event_t g;
-    sensors_event_t temp;
-
-    mpu.getEvent(&a, &g, &temp);
-
-    float x = a.acceleration.x;
-    float y = a.acceleration.y;
-
-    float gyroX = g.gyro.x;
-    float gyroY = g.gyro.y;
-    float gyroZ = g.gyro.z;
-
-    // ==================================================
-    // RILEVAMENTO SCOSSA
-    // ==================================================
-
-    float movimento =
-        abs(gyroX) +
-        abs(gyroY) +
-        abs(gyroZ);
-
-    if (movimento > 8.0 && !wasShaking) {
-        Serial.println(">>> SCOSSA!");
-        roboEyes.setMood(ANGRY);
-        shakeUntil = millis() + 800;
-        wasShaking = true;
-    }
-
-    if (wasShaking && millis() > shakeUntil) {
-        if (tiredMode) {
-            roboEyes.setMood(TIRED);
-        } else {
-            roboEyes.setMood(DEFAULT);
-        }
-
-        wasShaking = false;
-        Serial.println(">>> SCOSSA FINITA");
-    }
-
-    // ==================================================
-    // DIREZIONE MPU
-    // ==================================================
-
-    const float threshold = 2.5;
-
-    bool right = x > threshold;
-    bool left = x < -threshold;
-    bool forward = y < -threshold;
-    bool backward = y > threshold;
-
-    // ==================================================
-    // MAPPA OCCHI
-    // ==================================================
-
-    if (right && backward) {
-        roboEyes.setPosition(NE);
-    }
-    else if (right && forward) {
-        roboEyes.setPosition(NW);
-    }
-    else if (left && backward) {
-        roboEyes.setPosition(SE);
-    }
-    else if (left && forward) {
-        roboEyes.setPosition(SW);
-    }
-    else if (right) {
-        roboEyes.setPosition(N);
-    }
-    else if (left) {
-        roboEyes.setPosition(S);
-    }
-    else if (backward) {
-        roboEyes.setPosition(E);
-    }
-    else if (forward) {
-        roboEyes.setPosition(W);
-    }
-    else {
-        roboEyes.setPosition(DEFAULT);
-    }
-  
-  // Posizione e animazione degli occhi
-  int bx = 0;
-  int by = 0;
-  float blinkScale = 1.0f;
-
-  if (eyeModelIndex == EYE_CYBER) {
+  }
+  else if (eyeModelIndex == EYE_CYBER) {
     int top = 17 + by, bottom = 43 + by;
     int ox = bx;
     if (!customBlinking) {
@@ -486,7 +800,63 @@ void loop() {
     display.drawLine(85 + bx, 18 + by, 105 + bx, 24 + by, SSD1306_WHITE);
     display.drawPixel(112 + bx, 16 + by, SSD1306_WHITE);
   }
-
-
-    delay(20);
 }
+
+void drawEyePair(int leftX, int rightX, int topY, int w, int h, int pupilX, int pupilY, bool round, bool outline) {
+  int radius = round ? h / 2 : 2;
+  if (outline) { display.drawRoundRect(leftX, topY, w, h, radius, SSD1306_WHITE); display.drawRoundRect(rightX, topY, w, h, radius, SSD1306_WHITE); }
+  else { display.fillRoundRect(leftX, topY, w, h, radius, SSD1306_WHITE); display.fillRoundRect(rightX, topY, w, h, radius, SSD1306_WHITE); }
+  int p = max(2, h / 4);
+  int lp = constrain(leftX + w / 2 - p / 2 + pupilX, leftX + 2, leftX + w - p - 2);
+  int rp = constrain(rightX + w / 2 - p / 2 + pupilX, rightX + 2, rightX + w - p - 2);
+  int py = constrain(topY + h / 2 - p / 2 + pupilY, topY + 2, topY + h - p - 2);
+  display.fillCircle(lp + p / 2, py + p / 2, max(1, p / 2), SSD1306_BLACK);
+  display.fillCircle(rp + p / 2, py + p / 2, max(1, p / 2), SSD1306_BLACK);
+}
+
+void drawBehavior() { drawList("COMPORTAMENTO", behaviorLabels, behaviorItems, behaviorIndex); }
+void drawDisplaySettings() {
+  display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1);
+  display.setCursor(0, 0); display.println("DISPLAY"); display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  int bright = displayBrightness * 100 / 255; const char* clockText = clockEnabled ? "ON" : "OFF"; const char* timeoutText = displayTimeout == 0 ? "OFF" : "30s";
+  for (int i = 0; i < displayItems; i++) { int y = 14 + i * 12; display.setCursor(2, y); display.print(i == displayIndex ? ">" : " "); display.setCursor(12, y); display.print(displayLabels[i]); if (i == 0) { display.setCursor(92, y); display.printf("%d%%", bright); } if (i == 1) { display.setCursor(92, y); display.print(timeoutText); } if (i == 2) { display.setCursor(92, y); display.print(clockText); } if (i == 3) { display.setCursor(92, y); display.print("ON"); } }
+  display.display();
+}
+void drawControls() {
+  display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1); display.setCursor(0, 0); display.println("CONTROLLI"); display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  display.setCursor(2, 14); display.print(controlIndex == 0 ? "> " : "  "); display.println("MAPPATURA"); display.setCursor(8, 26); display.println("B SU   R GIU"); display.setCursor(8, 38); display.println("BL IND   N OK"); display.setCursor(2, 50); display.print(controlIndex == 1 ? "> " : "  "); display.println("MENU HOLD 2.5s"); display.display();
+}
+void drawSounds() {
+  display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1); display.setCursor(0, 0); display.println("SUONI"); display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  for (int i = 0; i < 3; i++) { int y = 14 + i * 12; display.setCursor(2, y); display.print(i == soundIndex ? ">" : " "); display.setCursor(12, y); display.print(soundLabels[i]); if (i == 0) { display.setCursor(94, y); display.print("--"); } if (i == 1) { display.setCursor(94, y); display.print(uiSounds ? "ON" : "OFF"); } if (i == 2) { display.setCursor(94, y); display.print("ON"); } }
+  display.display();
+}
+void drawReset() {
+  display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1); display.setCursor(0, 0); display.println("RESET"); display.drawLine(0, 9, 127, 9, SSD1306_WHITE); display.setCursor(4, 24); display.println("Ripristina default?"); display.setCursor(4, 40); display.println("N = SI"); display.setCursor(4, 52); display.println("BL = NO"); display.display();
+}
+void drawSystemInfo() {
+  display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1); display.setCursor(0, 0); display.println("INFO ROBOT"); display.drawLine(0, 9, 127, 9, SSD1306_WHITE); display.setCursor(2, 14); display.println("DESKTOPROBOT"); display.setCursor(2, 26); display.println("OS v0.3"); display.setCursor(2, 38); display.println("FW v0.3.0"); display.setCursor(2, 50); display.printf("UP %lus", millis() / 1000UL); display.display();
+}
+void drawResources() {
+  uint32_t freeHeap = ESP.getFreeHeap(), totalHeap = ESP.getHeapSize(), minHeap = ESP.getMinFreeHeap(), sketch = ESP.getSketchSize(), freeSketch = ESP.getFreeSketchSpace();
+  int ramPct = totalHeap ? (int)((totalHeap - freeHeap) * 100UL / totalHeap) : 0; int flashPct = (sketch + freeSketch) ? (int)(sketch * 100UL / (sketch + freeSketch)) : 0;
+  display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1); display.setCursor(0, 0); display.println("RISORSE"); display.drawLine(0, 9, 127, 9, SSD1306_WHITE); display.setCursor(2, 13); display.printf("CPU %uMHz", ESP.getCpuFreqMHz()); display.setCursor(2, 25); display.printf("RAM %3d%%", ramPct); drawBar(67, 25, 58, 6, ramPct); display.setCursor(2, 37); display.printf("FREE %luK", (unsigned long)(freeHeap / 1024)); display.setCursor(2, 49); display.printf("MIN %luK", (unsigned long)(minHeap / 1024)); display.setCursor(70, 37); display.printf("FLASH %d%%", flashPct); display.display();
+}
+void drawBar(int x, int y, int w, int h, int percent) { percent = constrain(percent, 0, 100); display.drawRect(x, y, w, h, SSD1306_WHITE); int fill = (w - 2) * percent / 100; if (fill > 0) display.fillRect(x + 1, y + 1, fill, h - 2, SSD1306_WHITE); }
+void drawHardware() {
+  display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1); display.setCursor(0, 0); display.println("HARDWARE"); display.drawLine(0, 9, 127, 9, SSD1306_WHITE); display.setCursor(2, 14); display.println("ESP32 OK"); display.setCursor(2, 25); display.printf("OLED 0x3C %s", displayAvailable ? "OK" : "ERR"); display.setCursor(2, 36); display.printf("MPU 0x68 %s", sensorAvailable ? "OK" : "ERR"); display.setCursor(2, 47); display.println("BTN 19/23/18/5"); display.display();
+}
+void drawDiagnostics() {
+  Wire.beginTransmission(OLED_ADDR); bool oledBus = Wire.endTransmission() == 0; Wire.beginTransmission(0x68); bool mpuBus = Wire.endTransmission() == 0;
+  display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1); display.setCursor(0, 0); display.println("DIAGNOSTICA"); display.drawLine(0, 9, 127, 9, SSD1306_WHITE); display.setCursor(2, 14); display.printf("I2C %s", oledBus && mpuBus ? "OK" : "ERR"); display.setCursor(2, 26); display.printf("OLED %s", oledBus ? "OK" : "ERR"); display.setCursor(2, 38); display.printf("MPU6050 %s", mpuBus ? "OK" : "ERR"); display.setCursor(2, 50); display.println("N = RITESTA"); display.display();
+}
+void drawReboot() {
+  display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1); display.setCursor(0, 0); display.println("RIAVVIA ROBOT"); display.drawLine(0, 9, 127, 9, SSD1306_WHITE); display.setCursor(5, 25); display.println("N = RIAVVIA"); display.setCursor(5, 39); display.println("BL = ANNULLA"); display.display();
+}
+void loadSettings() {
+  prefs.begin("desktop", false); eyeModelIndex = prefs.getInt("model", 0); eyeExpressionIndex = prefs.getInt("expr", 0); clockEnabled = prefs.getBool("clock", true); displayBrightness = prefs.getInt("bright", 255); displayTimeout = prefs.getInt("timeout", 0); uiSounds = prefs.getBool("uisound", true);
+  eyeModelIndex = constrain(eyeModelIndex, 0, EYE_MODEL_COUNT - 1); eyeExpressionIndex = constrain(eyeExpressionIndex, 0, EYE_EXPRESSION_COUNT - 1); displayBrightness = constrain(displayBrightness, 32, 255); if (displayAvailable) { display.ssd1306_command(SSD1306_SETCONTRAST); display.ssd1306_command(displayBrightness); }
+}
+void saveSettings() { prefs.putInt("model", eyeModelIndex); prefs.putInt("expr", eyeExpressionIndex); prefs.putBool("clock", clockEnabled); prefs.putInt("bright", displayBrightness); prefs.putInt("timeout", displayTimeout); prefs.putBool("uisound", uiSounds); }
+void resetSettings() { eyeModelIndex = EYE_CLASSIC; eyeExpressionIndex = EXPR_DEFAULT; clockEnabled = true; displayBrightness = 255; displayTimeout = 0; uiSounds = true; saveSettings(); if (displayAvailable) { display.ssd1306_command(SSD1306_SETCONTRAST); display.ssd1306_command(255); } applyEyeModel(); applyEyeExpression(); }
+
