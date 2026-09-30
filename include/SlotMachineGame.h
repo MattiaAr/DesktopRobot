@@ -58,7 +58,7 @@ private:
 
     static const SymbolWeight symbolWeights[5];
     static const uint16_t bets[6];
-    static const uint16_t payouts[6][4];
+    static const uint8_t payoutMultipliers[5][2];
 
     Preferences storage;
     SlotState currentState = SlotState::READY;

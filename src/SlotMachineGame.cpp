@@ -1,7 +1,6 @@
 #include "SlotMachineGame.h"
 
-// Explicit configuration: each of the five symbols has 20/100 weight on each reel.
-// This transparent baseline is not a calibrated return-to-player model.
+// Symbol weights are percentages and apply independently to each reel.
 const SlotMachineGame::SymbolWeight SlotMachineGame::symbolWeights[5] = {
     {SlotSymbol::LEMON,  36},
     {SlotSymbol::CHERRY, 27},
@@ -12,15 +11,23 @@ const SlotMachineGame::SymbolWeight SlotMachineGame::symbolWeights[5] = {
 
 const uint16_t SlotMachineGame::bets[6] = {5, 10, 20, 40, 80, 160};
 
-// Entries follow [lemon, cherry, bell, seven], indexed by bet.
-const uint16_t SlotMachineGame::payouts[6][4] = {
-    {10, 25, 40, 100},
-    {20, 35, 55, 150},
-    {40, 55, 70, 250},
-    {80, 110, 140, 500},
-    {160, 220, 280, 1000},
-    {320, 440, 560, 2000}
-};
+// Gross payout multipliers, scaled by 2: [symbol][exact pair, triple].
+// Examples: 3 means 1.5x; 36 means 18x. The wager is already debited,
+// so the returned payout includes the original wager amount.
+namespace {
+uint8_t payoutMultiplier(SlotSymbol symbol, uint8_t outcomeIndex) {
+    static const uint8_t payoutMultipliers[5][2] = {
+        {2,  5},  // Lemon: 1x pair, 2.5x triple
+        {2,  5},  // Cherry: 1x pair, 2.5x triple
+        {5,  7},  // Bell: 2.5x pair, 3.5x triple
+        {8, 10},  // BAR: 4x pair, 5x triple
+        {10, 20}  // Seven: 5x pair, 10x triple
+    };
+
+    const uint8_t symbolIndex = static_cast<uint8_t>(symbol);
+    return symbolIndex < 5 && outcomeIndex < 2 ? payoutMultipliers[symbolIndex][outcomeIndex] : 0U;
+}
+} // namespace
 
 void SlotMachineGame::begin() {
     storage.begin("slot", false);
@@ -55,7 +62,7 @@ void SlotMachineGame::update(uint32_t now) {
         return;
     }
 
-    if (currentState == SlotState::RESULT && now - resultShownAt >= 2200) {
+    if (currentState == SlotState::RESULT && now - resultShownAt >= 800) {
         currentState = balance < 5 ? SlotState::CREDITS_EMPTY : SlotState::READY;
     }
 }
@@ -153,9 +160,19 @@ uint16_t SlotMachineGame::availableBet(uint8_t index) const {
     return index < availableBetCount() ? bets[index] : 0;
 }
 
+//uint8_t SlotMachineGame::availableBetCount() const {
+//    uint8_t count = balance >= 5000 ? 6 : balance >= 2000 ? 5 : balance >= 1000 ? 4 : balance >= 500 ? 3 : balance >= 100 ? 2 : 1;
+//    while (count > 0 && bets[count - 1] > balance) --count;
+//    return count;
+//}
+
 uint8_t SlotMachineGame::availableBetCount() const {
-    uint8_t count = balance >= 5000 ? 6 : balance >= 2000 ? 5 : balance >= 1000 ? 4 : balance >= 500 ? 3 : balance >= 100 ? 2 : 1;
-    while (count > 0 && bets[count - 1] > balance) --count;
+    uint8_t count = 0;
+
+    while (count < 6 && bets[count] <= balance) {
+        ++count;
+    }
+
     return count;
 }
 
@@ -172,18 +189,50 @@ SlotSymbol SlotMachineGame::drawSymbol() {
 }
 
 uint16_t SlotMachineGame::evaluatePayout() const {
-    if (result[0] != result[1] || result[1] != result[2]) return 0;
+    // Count matching symbols. A triple is evaluated before a pair, so it
+    // receives only the triple award and is never paid twice.
+    uint8_t matchingSymbol = 0;
+    uint8_t matchCount = 0;
 
-    uint8_t category;
-    switch (result[0]) {
-        case SlotSymbol::LEMON: category = 0; break;
-        case SlotSymbol::CHERRY: category = 1; break;
-        case SlotSymbol::BELL: category = 2; break;
-        case SlotSymbol::SEVEN: category = 3; break;
-        case SlotSymbol::BAR: return 0;
-        default: return 0;
+    for (uint8_t i = 0; i < 3; ++i) {
+        uint8_t count = 0;
+
+        for (uint8_t j = 0; j < 3; ++j) {
+            if (result[i] == result[j]) {
+                ++count;
+            }
+        }
+
+        if (count > matchCount) {
+            matchCount = count;
+            matchingSymbol = static_cast<uint8_t>(result[i]);
+        }
     }
-    return payouts[selectedBetIndex][category];
+
+    // No pair or invalid symbol: no payout.
+    if (matchCount < 2 ||
+        matchingSymbol > static_cast<uint8_t>(SlotSymbol::SEVEN)) {
+        return 0;
+    }
+
+    // 0 = pair, 1 = triple.
+    const bool isTriple = (matchCount == 3);
+
+    const uint8_t multiplierX2 = payoutMultiplier(
+        static_cast<SlotSymbol>(matchingSymbol),
+        isTriple ? 1 : 0
+    );
+
+    // Integer arithmetic; a 1.5x payout on a 5-coin bet is rounded down.
+    // Calculate the gross payout.
+    const uint32_t rawPayout =
+        (static_cast<uint32_t>(settledBet) * multiplierX2) / 2U;
+
+    // Round the payout up to the next multiple of 5.
+    const uint32_t roundedPayout =
+        ((rawPayout + 4U) / 5U) * 5U;
+
+    return static_cast<uint16_t>(roundedPayout);
 }
 
 void SlotMachineGame::settle(uint32_t now) {
