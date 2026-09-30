@@ -12,7 +12,7 @@ const SlotMachineGame::SymbolWeight SlotMachineGame::symbolWeights[5] = {
 const uint16_t SlotMachineGame::bets[6] = {5, 10, 20, 40, 80, 160};
 
 // Gross payout multipliers, scaled by 2: [symbol][exact pair, triple].
-// Examples: 3 means 1.5x; 36 means 18x. The wager is already debited,
+// Examples: 3 means 1.5x; The wager is already debited,
 // so the returned payout includes the original wager amount.
 namespace {
 uint8_t payoutMultiplier(SlotSymbol symbol, uint8_t outcomeIndex) {
@@ -223,8 +223,8 @@ uint16_t SlotMachineGame::evaluatePayout() const {
         isTriple ? 1 : 0
     );
 
-    // Integer arithmetic; a 1.5x payout on a 5-coin bet is rounded down.
-    // Calculate the gross payout.
+    // Calculate the gross payout using integer arithmetic.
+    // The result is then rounded up to the next multiple of 5.
     const uint32_t rawPayout =
         (static_cast<uint32_t>(settledBet) * multiplierX2) / 2U;
 
